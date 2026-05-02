@@ -4265,7 +4265,8 @@ function LiveOrderBoard({ data, setData }) {
 }
 
 // ── ORDERS ────────────────────────────────────────────────────
-function Orders({data,setData,perms,sess,activeWaiter}){\n  const effectiveWaiter = (data.restaurant?.waiterMode==="picker" && activeWaiter) ? activeWaiter : (sess?.name||"");
+function Orders({data,setData,perms,sess,activeWaiter}){
+  const effectiveWaiter = (data.restaurant?.waiterMode==="picker" && activeWaiter) ? activeWaiter : (sess?.name||"");
   const [modal,setModal]=useState(null);const [form,setForm]=useState({tableId:"",items:[],customerName:"",note:"",discount:0});
   const [filter,setFilter]=useState("all");const [search,setSearch]=useState("");
   const [splitOrder,setSplitOrder]=useState(null);
