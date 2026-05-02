@@ -1016,23 +1016,67 @@ const D_DATA={
   ],
 };
 
-function useStore(key,def){
-  const [val,setVal]=useState(()=>{try{const s=localStorage.getItem(key);return s?JSON.parse(s):def;}catch{return def;}});
-  const set=useCallback(next=>{setVal(prev=>{const n=typeof next==="function"?next(prev):next;try{localStorage.setItem(key,JSON.stringify(n));}catch{}return n;});},[key]);
-  // Cross-tab / cross-account sync via storage events
-  useEffect(()=>{
-    const handler=(e)=>{
-      if(e.key===key&&e.newValue){try{setVal(JSON.parse(e.newValue));}catch{}}
-    };
-    window.addEventListener("storage",handler);
-    return()=>window.removeEventListener("storage",handler);
-  },[key]);
-  // Poll every 3s for same-tab multi-account sync
-  useEffect(()=>{
-    const id=setInterval(()=>{try{const s=localStorage.getItem(key);if(s){const parsed=JSON.parse(s);setVal(prev=>JSON.stringify(prev)===s?prev:parsed);}}catch{}},3000);
-    return()=>clearInterval(id);
-  },[key]);
-  return [val,set];
+// ── CLOUD STORAGE HELPERS ─────────────────────────────────────
+async function cloudGet(key) {
+  try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; } catch { return null; }
+}
+async function cloudSet(key, value) {
+  try { await window.storage.set(key, JSON.stringify(value)); } catch {}
+}
+// Keys that stay local (preferences, not shared data)
+const LOCAL_ONLY_KEYS = new Set(["rcm_theme","rcm_custom_theme","rcm_printer","rcm_normal_printer","rcm_delivery_api","rcm_activity_log"]);
+
+function useStore(key, def) {
+  const isLocal = LOCAL_ONLY_KEYS.has(key);
+  const [val, setVal] = useState(() => {
+    try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : def; } catch { return def; }
+  });
+
+  // Load from cloud on mount
+  useEffect(() => {
+    if (isLocal) return;
+    cloudGet(key).then(remote => { if (remote !== null) setVal(remote); });
+  }, [key]);
+
+  const set = useCallback(next => {
+    setVal(prev => {
+      const n = typeof next === "function" ? next(prev) : next;
+      if (isLocal) {
+        try { localStorage.setItem(key, JSON.stringify(n)); } catch {}
+      } else {
+        cloudSet(key, n);
+        try { localStorage.setItem(key, JSON.stringify(n)); } catch {}
+      }
+      return n;
+    });
+  }, [key]);
+
+  // Cross-tab sync
+  useEffect(() => {
+    if (!isLocal) return;
+    const handler = e => { if (e.key === key && e.newValue) { try { setVal(JSON.parse(e.newValue)); } catch {} } };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, [key]);
+
+  // Poll cloud every 5s for real-time multi-device sync
+  useEffect(() => {
+    if (isLocal) return;
+    const id = setInterval(async () => {
+      const remote = await cloudGet(key);
+      if (remote !== null) {
+        setVal(prev => {
+          const remoteStr = JSON.stringify(remote);
+          const prevStr = JSON.stringify(prev);
+          if (prevStr !== remoteStr) { try { localStorage.setItem(key, remoteStr); } catch {} return remote; }
+          return prev;
+        });
+      }
+    }, 5000);
+    return () => clearInterval(id);
+  }, [key]);
+
+  return [val, set];
 }
 
 // ── UI PRIMITIVES ─────────────────────────────────────────────
@@ -3679,6 +3723,7 @@ function POSExpress({ data, setData, onClose, onSwitch, isMobile }) {
                     <span style={{ fontWeight:700, minWidth:20, textAlign:"center" }}>{item.qty}</span>
                     <button onClick={()=>chQty(item.menuId,1)} style={{ width:28, height:28, borderRadius:7, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:16 }}>+</button>
                     <span style={{ color:C.accent, fontWeight:600, fontSize:13, minWidth:54, textAlign:"right" }}>{inr(item.qty*item.price)}</span>
+                    <button onClick={()=>setItems(prev=>prev.filter(i=>i.menuId!==item.menuId))} style={{ width:24, height:24, borderRadius:5, background:C.red+"22", color:C.red, border:"none", cursor:"pointer", fontSize:12 }}>✕</button>
                   </div>
                 ))}
               </div>
@@ -3980,6 +4025,69 @@ function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
   );
 }
 
+// ── KITCHEN PICKUP ────────────────────────────────────────────
+// Lets waiters mark individual items they've picked up from the kitchen to serve
+function KitchenPickup({ data, setData, waiterName }) {
+  useTheme();
+  const readyOrders = data.orders.filter(o => o.status === "served" || (o.status === "preparing" && getOrderStage(o) === "ready"));
+  if (!readyOrders.length) return (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "16px 18px", marginBottom: 14 }}>
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>🍽️ Kitchen Pickup</div>
+      <div style={{ color: C.muted, fontSize: 12 }}>No orders ready for pickup right now. Items marked ready in the kitchen will appear here.</div>
+    </div>
+  );
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.green}44`, borderRadius: 12, padding: "16px 18px", marginBottom: 14 }}>
+      <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10, color: C.green }}>🍽️ Kitchen Pickup — Ready to Serve</div>
+      {readyOrders.map(order => {
+        const tbl = data.tables.find(t => t.id === order.tableId);
+        const pickedUp = order.pickedUp || {};
+        const allPicked = order.items.every((_, i) => pickedUp[i]);
+        return (
+          <div key={order.id} style={{ background: C.surface, borderRadius: 10, padding: "12px 14px", marginBottom: 10, border: `1px solid ${allPicked ? C.green : C.border}` }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>Table {tbl?.number || "?"} — #{order.id.slice(-5).toUpperCase()}</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {!allPicked && <button onClick={() => {
+                  const picked = {};
+                  order.items.forEach((_, i) => { picked[i] = true; });
+                  setData(d => ({ ...d, orders: d.orders.map(o => o.id === order.id ? { ...o, pickedUp: picked, pickedUpBy: waiterName, pickedUpAt: now() } : o) }));
+                }} style={{ fontSize: 11, background: C.green + "22", color: C.green, border: `1px solid ${C.green}44`, borderRadius: 6, padding: "3px 9px", cursor: "pointer", fontWeight: 600 }}>✅ Pick All</button>}
+                {allPicked && <span style={{ fontSize: 11, color: C.green, fontWeight: 700 }}>✅ All Picked Up{order.pickedUpBy ? ` by ${order.pickedUpBy}` : ""}</span>}
+              </div>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {order.items.map((item, idx) => {
+                const picked = pickedUp[idx];
+                return (
+                  <button key={idx} onClick={() => {
+                    const newPickedUp = { ...(order.pickedUp || {}), [idx]: !picked };
+                    const allNowPicked = order.items.every((_, i) => newPickedUp[i]);
+                    setData(d => ({ ...d, orders: d.orders.map(o => o.id === order.id ? {
+                      ...o, pickedUp: newPickedUp,
+                      pickedUpBy: allNowPicked ? waiterName : o.pickedUpBy,
+                      pickedUpAt: allNowPicked ? now() : o.pickedUpAt,
+                    } : o) }));
+                  }} style={{
+                    padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: "pointer",
+                    background: picked ? C.green + "22" : C.card,
+                    color: picked ? C.green : C.cream,
+                    border: `1px solid ${picked ? C.green : C.border}`,
+                    textDecoration: picked ? "line-through" : "none",
+                    opacity: picked ? 0.7 : 1,
+                  }}>
+                    {picked ? "✓ " : ""}{item.name} ×{item.qty}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── LIVE ORDER BOARD ──────────────────────────────────────────
 function LiveOrderBoard({ data, setData }) {
   useTheme();
@@ -4157,7 +4265,7 @@ function LiveOrderBoard({ data, setData }) {
 }
 
 // ── ORDERS ────────────────────────────────────────────────────
-function Orders({data,setData,perms,sess}){
+function Orders({data,setData,perms,sess,activeWaiter}){\n  const effectiveWaiter = (data.restaurant?.waiterMode==="picker" && activeWaiter) ? activeWaiter : (sess?.name||"");
   const [modal,setModal]=useState(null);const [form,setForm]=useState({tableId:"",items:[],customerName:"",note:"",discount:0});
   const [filter,setFilter]=useState("all");const [search,setSearch]=useState("");
   const [splitOrder,setSplitOrder]=useState(null);
@@ -4178,6 +4286,8 @@ function Orders({data,setData,perms,sess}){
     return matchF&&matchS;
   });
   return <div className="fade-in">
+    {/* Kitchen Pickup for waiters */}
+    {(sess?.role==="waiter"||sess?.role==="admin"||sess?.role==="manager")&&<KitchenPickup data={data} setData={setData} waiterName={effectiveWaiter} />}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
       <div className="playfair" style={{fontSize:24}}>Orders</div>
       <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -4374,7 +4484,7 @@ function Orders({data,setData,perms,sess}){
           <Field label="TABLE"><select value={form.tableId} onChange={sf("tableId")}><option value="">Select table</option>{data.tables.map(t=><option key={t.id} value={t.id}>Table {t.number} ({t.status})</option>)}</select></Field>
           <Field label="DISCOUNT (₹)"><input type="number" value={form.discount||""} onChange={sf("discount")} placeholder="0" /></Field>
           <Field label="KITCHEN NOTE"><textarea value={form.note} onChange={sf("note")} placeholder="Less spicy, no onion, allergies..." rows={3} style={{resize:"vertical",minHeight:60}} /></Field>
-          <Btn full onClick={()=>{setData(d=>({...d,orders:[...d.orders,{id:mkId(),...form,discount:disc,tax,total,createdAt:now(),status:"pending"}],tables:d.tables.map(t=>t.id===form.tableId?{...t,status:"occupied",occupiedAt:t.occupiedAt||Date.now()}:t),ingredients:deductIngredients(form.items,d.menu,d.ingredients||[])}));setModal(null);}} disabled={!form.tableId||form.items.length===0}>Place Order →</Btn>
+          <Btn full onClick={()=>{setData(d=>({...d,orders:[...d.orders,{id:mkId(),...form,discount:disc,tax,total,createdAt:now(),status:"pending",waiterName:effectiveWaiter}],tables:d.tables.map(t=>t.id===form.tableId?{...t,status:"occupied",occupiedAt:t.occupiedAt||Date.now()}:t),ingredients:deductIngredients(form.items,d.menu,d.ingredients||[])}));setModal(null);}} disabled={!form.tableId||form.items.length===0}>Place Order →</Btn>
         </div>
       </div>
     </Modal>}
@@ -6755,6 +6865,7 @@ function Analytics({data,perms}){
       {tabPill("categories","🗂 Categories")}
       {tabPill("peak","⏰ Peak Hours")}
       {tabPill("profit","📈 Profit & Loss")}
+      {tabPill("waiters","🤵 Waiters")}
     </div>
 
     {/* ── OVERVIEW ── */}
@@ -7057,6 +7168,39 @@ function Analytics({data,perms}){
           </table>
         </div>}
       </Card>
+    </div>}
+
+    {/* ── WAITERS TAB ── */}
+    {aTab==="waiters"&&<div className="fade-in">
+      <div style={{color:C.muted,fontSize:12,marginBottom:14}}>Order and revenue breakdown by waiter. Tracks both individual logins and picker-mode selections.</div>
+      {(()=>{
+        const waiterMap={};
+        allOrders.forEach(o=>{
+          const w=o.waiterName||o.customerName||"Unknown";
+          if(!waiterMap[w])waiterMap[w]={name:w,orders:0,revenue:0,paid:0,tables:new Set()};
+          waiterMap[w].orders++;
+          if(o.status==="paid"){waiterMap[w].revenue+=o.total||0;waiterMap[w].paid++;}
+          if(o.tableId)waiterMap[w].tables.add(o.tableId);
+        });
+        const waiters=Object.values(waiterMap).sort((a,b)=>b.revenue-a.revenue);
+        if(!waiters.length)return <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:40}}>No waiter data yet. Orders placed will be attributed to the serving waiter.</div>;
+        return <div style={{display:"grid",gap:10}}>
+          {waiters.map((w,i)=>(
+            <Card key={w.name} style={{display:"flex",gap:14,alignItems:"center"}}>
+              <div style={{width:40,height:40,borderRadius:"50%",background:C.accent+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:700,color:C.accent,flexShrink:0}}>{w.name[0]||"?"}</div>
+              <div style={{flex:1}}>
+                <div style={{fontWeight:700,fontSize:14}}>{w.name}</div>
+                <div style={{color:C.muted,fontSize:11}}>{w.orders} orders · {w.tables.size} tables served</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{color:C.green,fontWeight:700,fontSize:16}}>{inr(w.revenue)}</div>
+                <div style={{color:C.muted,fontSize:11}}>{w.paid} paid</div>
+              </div>
+              {i===0&&<Badge label="🏆 Top" color={C.accent}/>}
+            </Card>
+          ))}
+        </div>;
+      })()}
     </div>}
   </div>;
 }
@@ -7462,6 +7606,7 @@ function Settings({data,setData,users,setUsers,activeThemeId,onThemeChange,sess,
       {sTabPill("appearance","Appearance","🎨")}
       {sTabPill("printer","Printers","🖨️")}
       {sTabPill("accounts","Accounts","👤")}
+      {sTabPill("waitermode","Waiter Mode","🤵")}
       {sTabPill("tabs","Tab Access","📑")}
       {sTabPill("stations","Stations & Tax","🏪")}
       {sTabPill("activity","Activity Log","📋")}
@@ -8017,6 +8162,40 @@ function Settings({data,setData,users,setUsers,activeThemeId,onThemeChange,sess,
       <Btn onClick={()=>{setData(d=>({...d,restaurant:{...d.restaurant,...rForm}}));addLog(sess?.name||"Admin","Updated stations & tax","");alert("Saved!");}}>💾 Save Stations & Tax Settings</Btn>
     </div>}
 
+    {/* ══ WAITER MODE ══ */}
+    {sTab==="waitermode"&&<div className="fade-in">
+      <Card style={{marginBottom:12}}>
+        <div style={{fontWeight:600,fontSize:14,marginBottom:6}}>🤵 Waiter Login Mode</div>
+        <div style={{color:C.muted,fontSize:12,marginBottom:16}}>Choose how waiters identify themselves in the system. Changes take effect immediately.</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+          {[
+            {id:"individual",icon:"🔐",title:"Individual Login",desc:"Each waiter has their own username & password. Their name is tracked on all orders and analytics. Best for accountability."},
+            {id:"picker",icon:"👆",title:"Waiter Picker",desc:"A shared waiter account with a name picker at the top of the screen. Waiters tap their name before serving. Best for fast-paced environments."},
+          ].map(m=>{
+            const active=(data.restaurant.waiterMode||"individual")===m.id;
+            return <button key={m.id} onClick={()=>setData(d=>({...d,restaurant:{...d.restaurant,waiterMode:m.id}}))}
+              style={{background:active?C.accent+"22":C.surface,border:`2px solid ${active?C.accent:C.border}`,borderRadius:14,padding:20,textAlign:"left",cursor:"pointer",transition:"all .15s"}}>
+              <div style={{fontSize:28,marginBottom:8}}>{m.icon}</div>
+              <div style={{fontWeight:700,fontSize:14,color:active?C.accent:C.cream,marginBottom:4}}>{m.title}</div>
+              <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>{m.desc}</div>
+              {active&&<div style={{marginTop:10,fontSize:11,color:C.accent,fontWeight:700}}>✓ ACTIVE</div>}
+            </button>;
+          })}
+        </div>
+        {(data.restaurant.waiterMode||"individual")==="picker"&&<>
+          <div style={{fontWeight:600,fontSize:12,color:C.muted,marginBottom:8}}>WAITER NAMES FOR PICKER</div>
+          <div style={{color:C.muted,fontSize:11,marginBottom:10}}>These are the names shown in the picker. Usually matches your waiter accounts.</div>
+          {(data.restaurant.waiterNames||users.filter(u=>u.role==="waiter"&&u.active).map(u=>u.name)).map((name,i)=>(
+            <div key={i} style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+              <input value={name} onChange={e=>{const names=[...(data.restaurant.waiterNames||users.filter(u=>u.role==="waiter"&&u.active).map(u=>u.name))];names[i]=e.target.value;setData(d=>({...d,restaurant:{...d.restaurant,waiterNames:names}}));}} style={{flex:1,fontSize:13}} />
+              <button onClick={()=>{const names=(data.restaurant.waiterNames||users.filter(u=>u.role==="waiter"&&u.active).map(u=>u.name)).filter((_,j)=>j!==i);setData(d=>({...d,restaurant:{...d.restaurant,waiterNames:names}}));}} style={{background:C.red+"22",color:C.red,border:"none",borderRadius:6,padding:"6px 10px",cursor:"pointer"}}>✕</button>
+            </div>
+          ))}
+          <button onClick={()=>{const names=[...(data.restaurant.waiterNames||users.filter(u=>u.role==="waiter"&&u.active).map(u=>u.name)),"New Waiter"];setData(d=>({...d,restaurant:{...d.restaurant,waiterNames:names}}));}} style={{fontSize:12,color:C.accent,background:C.accent+"11",border:`1px dashed ${C.accent}`,borderRadius:7,padding:"6px 14px",cursor:"pointer",marginTop:4}}>+ Add Name</button>
+        </>}
+      </Card>
+    </div>}
+
         {/* ══ ACTIVITY LOG ══ */}
     {sTab==="activity"&&<div className="fade-in">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
@@ -8210,6 +8389,9 @@ export default function App(){
   },[data.reservations,sess]);
 
   const [showQuickPOS, setShowQuickPOS] = useState(false);
+  // Waiter picker state (for picker mode)
+  const [activeWaiter, setActiveWaiter] = useState(sess?.name || "");
+  useEffect(() => { if (sess?.name && !activeWaiter) setActiveWaiter(sess.name); }, [sess]);
 
   // Global keyboard shortcuts: P = Quick POS, B = Order Board
   useEffect(() => {
@@ -8247,7 +8429,7 @@ export default function App(){
 
   const visibleTabs=ALL_TABS.filter(t=>perms.tabs.includes(t.id));
   const roleColor={admin:C.accent,manager:C.blue,waiter:C.green,kitchen:C.red};
-  const tp={data,setData,perms};
+  const tp={data,setData,perms,sess,activeWaiter};
 
   // Auto-collapse sidebar on tablet
   useEffect(() => { if (isTablet && !isMobile) setSideOpen(false); }, [isTablet, isMobile]);
@@ -8260,8 +8442,17 @@ export default function App(){
       /* ── MOBILE LAYOUT ── */
       <div style={{display:"flex",flexDirection:"column",height:"100dvh",background:C.bg,overflow:"hidden"}}>
         {/* Mobile top bar */}
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:C.surface,borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:C.surface,borderBottom:`1px solid ${C.border}`,flexShrink:0,gap:8,flexWrap:"wrap"}}>
           <div className="playfair" style={{fontSize:15,fontWeight:700,color:C.accent}}>{data.restaurant.name}</div>
+          {data.restaurant.waiterMode==="picker"&&sess.role==="waiter"&&(()=>{
+            const names=data.restaurant.waiterNames||users.filter(u=>u.role==="waiter"&&u.active).map(u=>u.name);
+            return <div style={{display:"flex",alignItems:"center",gap:5,background:C.card,border:`1px solid ${C.border}`,borderRadius:7,padding:"3px 8px"}}>
+              <span style={{fontSize:10,color:C.muted}}>🤵</span>
+              <select value={activeWaiter} onChange={e=>setActiveWaiter(e.target.value)} style={{fontSize:11,fontWeight:700,color:C.accent,background:"transparent",border:"none",padding:0,cursor:"pointer"}}>
+                {names.map(n=><option key={n} value={n}>{n}</option>)}
+              </select>
+            </div>;
+          })()}
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             <button onClick={()=>setShowQuickPOS(true)} style={{background:C.accent+"22",color:C.accent,border:`1px solid ${C.accent}44`,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700}}>⚡ POS</button>
             <NotifBell role={sess.role}/>
@@ -8324,6 +8515,16 @@ export default function App(){
         {/* Main content */}
         <div style={{flex:1,overflowY:"auto",maxHeight:"100dvh",minWidth:0}}>
           <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",padding:"10px 22px 0",gap:8,flexWrap:"wrap"}}>
+            {/* Waiter picker mode */}
+            {data.restaurant.waiterMode==="picker"&&sess.role==="waiter"&&(()=>{
+              const names=data.restaurant.waiterNames||users.filter(u=>u.role==="waiter"&&u.active).map(u=>u.name);
+              return <div style={{display:"flex",alignItems:"center",gap:6,background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"4px 10px"}}>
+                <span style={{fontSize:11,color:C.muted}}>🤵 Serving as:</span>
+                <select value={activeWaiter} onChange={e=>setActiveWaiter(e.target.value)} style={{fontSize:12,fontWeight:700,color:C.accent,background:"transparent",border:"none",padding:0,cursor:"pointer"}}>
+                  {names.map(n=><option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>;
+            })()}
             <button onClick={()=>setShowQuickPOS(true)} style={{background:C.accent+"22",color:C.accent,border:`1px solid ${C.accent}44`,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
               ⚡ Quick POS <span style={{fontSize:10,color:C.muted,fontWeight:400}}>[P]</span>
             </button>
