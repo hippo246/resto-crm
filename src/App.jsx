@@ -3445,18 +3445,311 @@ ${mode==="byItem"?`<h3>Item Assignment</h3>${order.items.map((item,ii)=>`<div cl
 // ── QUICK POS / RUSH MODE ─────────────────────────────────────
 function QuickPOS({ data, setData, onClose }) {
   useTheme();
+  const isMobile = useIsMobile();
+  const [mode, setMode] = useState(null); // null = picker, "express" | "pro"
+
+  if (!mode) return <POSModePicker onPick={setMode} onClose={onClose} isMobile={isMobile} />;
+  if (mode === "express") return <POSExpress data={data} setData={setData} onClose={onClose} onSwitch={() => setMode(null)} isMobile={isMobile} />;
+  return <POSPro data={data} setData={setData} onClose={onClose} onSwitch={() => setMode(null)} isMobile={isMobile} />;
+}
+
+// ── Mode Picker ───────────────────────────────────────────────
+function POSModePicker({ onPick, onClose, isMobile }) {
+  useTheme();
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:1000, background:C.bg+"ee", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24, animation:"fadeIn .18s ease" }}>
+      <button onClick={onClose} style={{ position:"absolute", top:16, right:16, background:C.border, color:C.muted, border:"none", borderRadius:8, padding:"7px 14px", fontSize:12, cursor:"pointer" }}>✕ Close</button>
+      <div style={{ fontSize:32, marginBottom:8 }}>⚡</div>
+      <div className="playfair" style={{ fontSize: isMobile?22:28, fontWeight:700, color:C.accent, marginBottom:6, textAlign:"center" }}>Point of Sale</div>
+      <div style={{ color:C.muted, fontSize:13, marginBottom:32, textAlign:"center" }}>Choose your mode</div>
+      <div style={{ display:"flex", gap:isMobile?14:20, flexDirection:isMobile?"column":"row", width:"100%", maxWidth:640 }}>
+        {/* Express */}
+        <button onClick={() => onPick("express")} style={{
+          flex:1, background:C.card, border:`2px solid ${C.green}44`, borderRadius:18,
+          padding: isMobile?"20px 18px":"28px 24px", cursor:"pointer", textAlign:"left",
+          transition:"all .15s", display:"flex", flexDirection:"column", gap:10
+        }} onMouseEnter={e=>{ e.currentTarget.style.border=`2px solid ${C.green}`; e.currentTarget.style.background=C.green+"11"; }}
+           onMouseLeave={e=>{ e.currentTarget.style.border=`2px solid ${C.green}44`; e.currentTarget.style.background=C.card; }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ fontSize:28 }}>🟢</div>
+            <div>
+              <div className="playfair" style={{ fontSize:isMobile?17:20, fontWeight:700, color:C.green }}>Express</div>
+              <div style={{ fontSize:11, color:C.muted, marginTop:1 }}>For new staff</div>
+            </div>
+          </div>
+          <div style={{ color:C.muted, fontSize:12, lineHeight:1.7 }}>
+            ✦ Guided step-by-step flow<br/>
+            ✦ Big tap-friendly buttons<br/>
+            ✦ No clutter — just essentials<br/>
+            ✦ Clear confirmations
+          </div>
+          <div style={{ background:C.green+"22", color:C.green, fontSize:12, fontWeight:700, padding:"8px 14px", borderRadius:9, textAlign:"center", marginTop:4 }}>
+            Start Express →
+          </div>
+        </button>
+        {/* Pro */}
+        <button onClick={() => onPick("pro")} style={{
+          flex:1, background:C.card, border:`2px solid ${C.accent}44`, borderRadius:18,
+          padding: isMobile?"20px 18px":"28px 24px", cursor:"pointer", textAlign:"left",
+          transition:"all .15s", display:"flex", flexDirection:"column", gap:10
+        }} onMouseEnter={e=>{ e.currentTarget.style.border=`2px solid ${C.accent}`; e.currentTarget.style.background=C.accent+"11"; }}
+           onMouseLeave={e=>{ e.currentTarget.style.border=`2px solid ${C.accent}44`; e.currentTarget.style.background=C.card; }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div style={{ fontSize:28 }}>⚡</div>
+            <div>
+              <div className="playfair" style={{ fontSize:isMobile?17:20, fontWeight:700, color:C.accent }}>Pro</div>
+              <div style={{ fontSize:11, color:C.muted, marginTop:1 }}>For experienced staff</div>
+            </div>
+          </div>
+          <div style={{ color:C.muted, fontSize:12, lineHeight:1.7 }}>
+            ✦ Full menu grid at once<br/>
+            ✦ Category filters + search<br/>
+            ✦ Notes, discounts & more<br/>
+            ✦ Maximum speed
+          </div>
+          <div style={{ background:C.accent+"22", color:C.accent, fontSize:12, fontWeight:700, padding:"8px 14px", borderRadius:9, textAlign:"center", marginTop:4 }}>
+            Launch Pro →
+          </div>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── EXPRESS POS (guided, newbie-friendly) ─────────────────────
+function POSExpress({ data, setData, onClose, onSwitch, isMobile }) {
+  useTheme();
+  const [step, setStep] = useState(1); // 1=table, 2=items, 3=review
+  const [tableId, setTableId] = useState("");
+  const [customerName, setCustomerName] = useState("");
+  const [items, setItems] = useState([]);
+  const [catFilter, setCatFilter] = useState("All");
+  const [search, setSearch] = useState("");
+  const [placed, setPlaced] = useState(false);
+
+  const cats = ["All", ...new Set(data.menu.map(m => m.category))];
+  const visible = data.menu.filter(m =>
+    m.available &&
+    (catFilter === "All" || m.category === catFilter) &&
+    (!search || m.name.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  const addItem = m => setItems(prev => {
+    const ex = prev.find(i => i.menuId === m.id);
+    if (ex) return prev.map(i => i.menuId === m.id ? { ...i, qty: i.qty + 1 } : i);
+    return [...prev, { menuId: m.id, name: m.name, qty: 1, price: m.price }];
+  });
+  const chQty = (menuId, delta) => setItems(prev =>
+    prev.map(i => i.menuId === menuId ? { ...i, qty: Math.max(0, i.qty + delta) } : i).filter(i => i.qty > 0)
+  );
+
+  const subtotal = items.reduce((s, i) => s + i.qty * i.price, 0);
+  const tax = Math.round(subtotal * 0.18);
+  const total = subtotal + tax;
+
+  const placeOrder = () => {
+    setData(d => ({
+      ...d,
+      orders: [...d.orders, { id:mkId(), tableId, items, customerName, note:"", tax, total, discount:0, createdAt:now(), status:"pending" }],
+      tables: d.tables.map(t => t.id===tableId ? {...t, status:"occupied", occupiedAt:t.occupiedAt||Date.now()} : t),
+      ingredients: deductIngredients(items, d.menu, d.ingredients||[])
+    }));
+    addLog(customerName||"POS", "Express Order", `Table ${data.tables.find(t=>t.id===tableId)?.number} · ${inr(total)}`);
+    emitNotif({ type:"order", title:"Order placed!", body:`Table ${data.tables.find(t=>t.id===tableId)?.number} · ${items.length} items · ${inr(total)}` });
+    setPlaced(true);
+    setTimeout(() => { setItems([]); setTableId(""); setCustomerName(""); setStep(1); setPlaced(false); }, 1600);
+  };
+
+  const stepLabels = ["Table", "Items", "Review"];
+  const pad = isMobile ? "10px 14px" : "12px 22px";
+
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:1000, background:C.bg, display:"flex", flexDirection:"column", animation:"fadeIn .18s ease" }}>
+      {/* Top bar */}
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding:pad, background:C.surface, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+        <div style={{ fontSize:18 }}>🟢</div>
+        <div className="playfair" style={{ fontSize:16, fontWeight:700, color:C.green }}>Express POS</div>
+        <div style={{ flex:1 }} />
+        <button onClick={onSwitch} style={{ background:C.border, color:C.muted, border:"none", borderRadius:7, padding:"5px 11px", fontSize:11, cursor:"pointer" }}>Switch Mode</button>
+        <button onClick={onClose} style={{ background:C.border, color:C.muted, border:"none", borderRadius:7, padding:"5px 11px", fontSize:11, cursor:"pointer" }}>✕</button>
+      </div>
+
+      {/* Step indicator */}
+      <div style={{ display:"flex", alignItems:"center", padding:"10px 22px", background:C.surface, borderBottom:`1px solid ${C.border}`, flexShrink:0, gap:0 }}>
+        {stepLabels.map((label, i) => {
+          const s = i + 1;
+          const done = step > s; const active = step === s;
+          return <React.Fragment key={s}>
+            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+              <div style={{ width:28, height:28, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700,
+                background: done ? C.green : active ? C.accent : C.border,
+                color: done||active ? C.bg : C.muted }}>
+                {done ? "✓" : s}
+              </div>
+              <span style={{ fontSize:12, color:active?C.cream:C.muted, fontWeight:active?600:400 }}>{label}</span>
+            </div>
+            {i < 2 && <div style={{ flex:1, height:2, background:done?C.green:C.border, margin:"0 8px", borderRadius:2 }} />}
+          </React.Fragment>;
+        })}
+      </div>
+
+      {/* Step content */}
+      <div style={{ flex:1, overflowY:"auto", padding: isMobile?"14px":"24px" }}>
+
+        {/* STEP 1: Table selection */}
+        {step === 1 && (
+          <div className="fade-in" style={{ maxWidth:500, margin:"0 auto" }}>
+            <div className="playfair" style={{ fontSize:20, marginBottom:4 }}>Which table?</div>
+            <div style={{ color:C.muted, fontSize:13, marginBottom:20 }}>Select the table for this order</div>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(100px,1fr))", gap:10, marginBottom:20 }}>
+              {data.tables.filter(t=>t.status!=="reserved").map(t => (
+                <button key={t.id} onClick={()=>setTableId(t.id)} style={{
+                  padding:"18px 10px", borderRadius:14, border:`2px solid ${tableId===t.id?C.accent:C.border}`,
+                  background:tableId===t.id?C.accent+"22":C.card, cursor:"pointer",
+                  color:tableId===t.id?C.accent:C.cream, fontWeight:700, fontSize:16, transition:"all .12s"
+                }}>
+                  <div style={{ fontSize:22, marginBottom:4 }}>🪑</div>
+                  <div>Table {t.number}</div>
+                  <div style={{ fontSize:10, color:t.status==="occupied"?C.orange:C.green, marginTop:3 }}>{t.status}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ marginBottom:16 }}>
+              <div style={{ color:C.muted, fontSize:11, fontWeight:600, marginBottom:6 }}>CUSTOMER NAME (OPTIONAL)</div>
+              <input value={customerName} onChange={e=>setCustomerName(e.target.value)} placeholder="e.g. John" style={{ fontSize:14 }} />
+            </div>
+            <button onClick={()=>setStep(2)} disabled={!tableId} style={{
+              width:"100%", padding:"15px", borderRadius:12, border:"none", fontSize:15, fontWeight:700, cursor:tableId?"pointer":"not-allowed",
+              background:tableId?C.accent:C.border, color:tableId?C.bg:C.muted, transition:"all .15s"
+            }}>Next: Choose Items →</button>
+          </div>
+        )}
+
+        {/* STEP 2: Item selection */}
+        {step === 2 && (
+          <div className="fade-in">
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:8 }}>
+              <div>
+                <div className="playfair" style={{ fontSize:18 }}>What would they like?</div>
+                <div style={{ color:C.muted, fontSize:12 }}>Table {data.tables.find(t=>t.id===tableId)?.number}{customerName?` · ${customerName}`:""}</div>
+              </div>
+              {items.length > 0 && (
+                <div style={{ background:C.accent+"22", color:C.accent, fontSize:12, fontWeight:700, padding:"6px 14px", borderRadius:20 }}>
+                  {items.reduce((s,i)=>s+i.qty,0)} items · {inr(subtotal)}
+                </div>
+              )}
+            </div>
+            {/* Search */}
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search..." style={{ marginBottom:10, fontSize:13 }} />
+            {/* Category pills */}
+            <div style={{ display:"flex", gap:6, marginBottom:12, flexWrap:"wrap" }}>
+              {cats.map(c=>(
+                <button key={c} onClick={()=>setCatFilter(c)} style={{
+                  padding:"5px 14px", borderRadius:20, fontSize:12, fontWeight:600, border:"none", cursor:"pointer",
+                  background:catFilter===c?C.accent:C.surface, color:catFilter===c?C.bg:C.muted
+                }}>{c}</button>
+              ))}
+            </div>
+            {/* Menu grid — bigger tap targets */}
+            <div style={{ display:"grid", gridTemplateColumns:`repeat(auto-fill,minmax(${isMobile?"130px":"170px"},1fr))`, gap:10, marginBottom:16 }}>
+              {visible.map(m => {
+                const inCart = items.find(i=>i.menuId===m.id);
+                return (
+                  <button key={m.id} onClick={()=>addItem(m)} style={{
+                    background:inCart?C.accent+"22":C.card, border:`2px solid ${inCart?C.accent:C.border}`,
+                    borderRadius:14, padding: isMobile?"16px 10px":"18px 12px", cursor:"pointer", textAlign:"left",
+                    position:"relative", transition:"all .12s"
+                  }}>
+                    {inCart && <div style={{ position:"absolute", top:-9, right:-9, background:C.accent, color:C.bg, borderRadius:"50%", width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700 }}>{inCart.qty}</div>}
+                    <div style={{ fontSize:14, fontWeight:600, marginBottom:4, lineHeight:1.3 }}>{m.name}</div>
+                    {m.category && <div style={{ fontSize:10, color:C.muted, marginBottom:5 }}>{m.category}</div>}
+                    <div style={{ color:C.accent, fontWeight:700, fontSize:16 }}>{inr(m.price)}</div>
+                  </button>
+                );
+              })}
+            </div>
+            {/* Cart summary bar */}
+            {items.length > 0 && (
+              <div style={{ position:"sticky", bottom:0, background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:"10px 14px", marginTop:8 }}>
+                <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:8 }}>CART</div>
+                {items.map(item=>(
+                  <div key={item.menuId} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                    <span style={{ flex:1, fontSize:13 }}>{item.name}</span>
+                    <button onClick={()=>chQty(item.menuId,-1)} style={{ width:28, height:28, borderRadius:7, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:16 }}>−</button>
+                    <span style={{ fontWeight:700, minWidth:20, textAlign:"center" }}>{item.qty}</span>
+                    <button onClick={()=>chQty(item.menuId,1)} style={{ width:28, height:28, borderRadius:7, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:16 }}>+</button>
+                    <span style={{ color:C.accent, fontWeight:600, fontSize:13, minWidth:54, textAlign:"right" }}>{inr(item.qty*item.price)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display:"flex", gap:10, marginTop:14 }}>
+              <button onClick={()=>setStep(1)} style={{ padding:"13px 20px", borderRadius:12, border:`1px solid ${C.border}`, background:"transparent", color:C.muted, cursor:"pointer", fontSize:14, fontWeight:600 }}>← Back</button>
+              <button onClick={()=>setStep(3)} disabled={items.length===0} style={{
+                flex:1, padding:"13px", borderRadius:12, border:"none", fontSize:15, fontWeight:700, cursor:items.length>0?"pointer":"not-allowed",
+                background:items.length>0?C.accent:C.border, color:items.length>0?C.bg:C.muted
+              }}>Review Order →</button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3: Review & Place */}
+        {step === 3 && (
+          <div className="fade-in" style={{ maxWidth:480, margin:"0 auto" }}>
+            <div className="playfair" style={{ fontSize:20, marginBottom:4 }}>Review & Confirm</div>
+            <div style={{ color:C.muted, fontSize:13, marginBottom:18 }}>Double-check before sending to kitchen</div>
+            <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:14, padding:16, marginBottom:16 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.muted, marginBottom:12 }}>
+                <span>Table {data.tables.find(t=>t.id===tableId)?.number}</span>
+                {customerName && <span>{customerName}</span>}
+              </div>
+              {items.map(item=>(
+                <div key={item.menuId} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0", borderBottom:`1px solid ${C.border}22` }}>
+                  <div>
+                    <div style={{ fontWeight:600, fontSize:14 }}>{item.name}</div>
+                    <div style={{ fontSize:12, color:C.muted }}>x{item.qty} · {inr(item.price)} each</div>
+                  </div>
+                  <div style={{ color:C.accent, fontWeight:700 }}>{inr(item.qty*item.price)}</div>
+                </div>
+              ))}
+              <div style={{ marginTop:14, paddingTop:10, borderTop:`1px solid ${C.border}` }}>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.muted, marginBottom:4 }}><span>Subtotal</span><span>{inr(subtotal)}</span></div>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.muted, marginBottom:8 }}><span>GST (18%)</span><span>{inr(tax)}</span></div>
+                <div style={{ display:"flex", justifyContent:"space-between", fontSize:18, fontWeight:800, color:C.accent }}><span>Total</span><span>{inr(total)}</span></div>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setStep(2)} style={{ padding:"13px 20px", borderRadius:12, border:`1px solid ${C.border}`, background:"transparent", color:C.muted, cursor:"pointer", fontSize:14, fontWeight:600 }}>← Edit</button>
+              <button onClick={placeOrder} disabled={placed} style={{
+                flex:1, padding:"16px", borderRadius:12, border:"none", fontSize:16, fontWeight:800, cursor:"pointer",
+                background:placed?C.green:C.accent, color:C.bg, transition:"all .2s",
+                transform:placed?"scale(0.97)":"scale(1)"
+              }}>
+                {placed ? "✅ Order Sent to Kitchen!" : "✅ Confirm & Send →"}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── PRO POS (advanced, fast, full-featured) ───────────────────
+function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
+  useTheme();
   const [items, setItems] = useState([]);
   const [tableId, setTableId] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [note, setNote] = useState("");
+  const [discount, setDiscount] = useState(0);
   const [catFilter, setCatFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [placed, setPlaced] = useState(false);
+  const [showCart, setShowCart] = useState(false); // mobile cart toggle
   const searchRef = useRef(null);
 
-  useEffect(() => { searchRef.current?.focus(); }, []);
-
-  // keyboard shortcut: Escape closes
+  useEffect(() => { if (!isMobile) searchRef.current?.focus(); }, []);
   useEffect(() => {
     const fn = e => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", fn);
@@ -3470,156 +3763,218 @@ function QuickPOS({ data, setData, onClose }) {
     (!search || m.name.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const addItem = m => {
-    setItems(prev => {
-      const ex = prev.find(i => i.menuId === m.id);
-      if (ex) return prev.map(i => i.menuId === m.id ? { ...i, qty: i.qty + 1 } : i);
-      return [...prev, { menuId: m.id, name: m.name, qty: 1, price: m.price }];
-    });
-  };
+  const addItem = m => setItems(prev => {
+    const ex = prev.find(i => i.menuId === m.id);
+    if (ex) return prev.map(i => i.menuId === m.id ? { ...i, qty: i.qty + 1 } : i);
+    return [...prev, { menuId: m.id, name: m.name, qty: 1, price: m.price }];
+  });
   const removeItem = menuId => setItems(prev => prev.filter(i => i.menuId !== menuId));
   const chQty = (menuId, delta) => setItems(prev =>
     prev.map(i => i.menuId === menuId ? { ...i, qty: Math.max(0, i.qty + delta) } : i).filter(i => i.qty > 0)
   );
 
   const subtotal = items.reduce((s, i) => s + i.qty * i.price, 0);
-  const tax = Math.round(subtotal * 0.18);
-  const total = subtotal + tax;
+  const discAmt = Math.min(Math.round(subtotal * discount / 100), subtotal);
+  const tax = Math.round((subtotal - discAmt) * 0.18);
+  const total = subtotal - discAmt + tax;
   const canPlace = tableId && items.length > 0;
 
   const placeOrder = () => {
     if (!canPlace) return;
     setData(d => ({
       ...d,
-      orders: [...d.orders, { id: mkId(), tableId, items, customerName, note, tax, total, discount: 0, createdAt: now(), status: "pending" }],
-      tables: d.tables.map(t => t.id === tableId ? { ...t, status: "occupied", occupiedAt: t.occupiedAt || Date.now() } : t),
-      ingredients: deductIngredients(items, d.menu, d.ingredients || [])
+      orders: [...d.orders, { id:mkId(), tableId, items, customerName, note, tax, total, discount:discAmt, createdAt:now(), status:"pending" }],
+      tables: d.tables.map(t => t.id===tableId ? {...t, status:"occupied", occupiedAt:t.occupiedAt||Date.now()} : t),
+      ingredients: deductIngredients(items, d.menu, d.ingredients||[])
     }));
-    addLog(customerName || "POS", "Quick Order", `Table ${data.tables.find(t=>t.id===tableId)?.number} · ${inr(total)}`);
-    emitNotif({ type: "order", title: "Order placed", body: `Table ${data.tables.find(t=>t.id===tableId)?.number} · ${items.length} items · ${inr(total)}` });
+    addLog(customerName||"POS", "Pro Order", `Table ${data.tables.find(t=>t.id===tableId)?.number} · ${inr(total)}`);
+    emitNotif({ type:"order", title:"Order placed", body:`Table ${data.tables.find(t=>t.id===tableId)?.number} · ${items.length} items · ${inr(total)}` });
     setPlaced(true);
-    setTimeout(() => {
-      setItems([]); setTableId(""); setCustomerName(""); setNote(""); setPlaced(false);
-    }, 1400);
+    setTimeout(() => { setItems([]); setTableId(""); setCustomerName(""); setNote(""); setDiscount(0); setPlaced(false); setShowCart(false); }, 1400);
   };
 
+  const cartCount = items.reduce((s,i)=>s+i.qty,0);
+
+  // Mobile: stacked layout with floating cart button
+  // Desktop: side-by-side
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 1000,
-      background: C.bg, display: "flex", flexDirection: "column",
-      animation: "fadeIn .18s ease"
-    }}>
+    <div style={{ position:"fixed", inset:0, zIndex:1000, background:C.bg, display:"flex", flexDirection:"column", animation:"fadeIn .18s ease" }}>
       {/* Top bar */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", background: C.surface, borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-        <div style={{ fontSize: 20 }}>⚡</div>
-        <div className="playfair" style={{ fontSize: 18, fontWeight: 700, color: C.accent }}>Quick POS</div>
-        <div style={{ fontSize: 11, color: C.muted, marginLeft: 4 }}>Rush Mode</div>
-        <div style={{ flex: 1 }} />
-        <input
-          ref={searchRef}
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search menu... (Esc to close)"
-          style={{ width: 220, fontSize: 13, padding: "7px 12px", borderRadius: 8, background: C.bg, border: `1px solid ${C.border}`, color: C.cream }}
-        />
-        <button onClick={onClose} style={{ background: C.border, color: C.muted, border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, cursor: "pointer" }}>✕ Close</button>
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding: isMobile?"9px 12px":"10px 18px", background:C.surface, borderBottom:`1px solid ${C.border}`, flexShrink:0, flexWrap:"wrap" }}>
+        <div style={{ fontSize:18 }}>⚡</div>
+        <div className="playfair" style={{ fontSize:16, fontWeight:700, color:C.accent }}>Pro POS</div>
+        {!isMobile && (
+          <input ref={searchRef} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search menu... (Esc to close)"
+            style={{ marginLeft:8, width:200, fontSize:12, padding:"6px 11px", borderRadius:8, background:C.bg, border:`1px solid ${C.border}`, color:C.cream }} />
+        )}
+        <div style={{ flex:1 }} />
+        <button onClick={onSwitch} style={{ background:C.border, color:C.muted, border:"none", borderRadius:7, padding:"5px 11px", fontSize:11, cursor:"pointer" }}>Switch Mode</button>
+        <button onClick={onClose} style={{ background:C.border, color:C.muted, border:"none", borderRadius:7, padding:"5px 11px", fontSize:11, cursor:"pointer" }}>✕</button>
       </div>
 
-      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-        {/* Left — menu grid */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", borderRight: `1px solid ${C.border}` }}>
+      <div style={{ display:"flex", flex:1, overflow:"hidden", position:"relative" }}>
+        {/* Menu panel */}
+        <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", borderRight: isMobile?"none":`1px solid ${C.border}` }}>
+          {/* Mobile search */}
+          {isMobile && (
+            <div style={{ padding:"8px 12px", borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 Search menu..." style={{ fontSize:13 }} />
+            </div>
+          )}
           {/* Category pills */}
-          <div style={{ display: "flex", gap: 6, padding: "10px 14px", flexWrap: "wrap", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-            {cats.map(c => (
-              <button key={c} onClick={() => setCatFilter(c)} style={{
-                padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none",
-                background: catFilter === c ? C.accent : C.surface,
-                color: catFilter === c ? C.bg : C.muted,
-                transition: "all .12s"
+          <div style={{ display:"flex", gap:6, padding: isMobile?"8px 12px":"10px 14px", overflowX:"auto", borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+            {cats.map(c=>(
+              <button key={c} onClick={()=>setCatFilter(c)} style={{
+                padding:"5px 14px", borderRadius:20, fontSize:12, fontWeight:600, border:"none", cursor:"pointer", whiteSpace:"nowrap",
+                background:catFilter===c?C.accent:C.surface, color:catFilter===c?C.bg:C.muted
               }}>{c}</button>
             ))}
           </div>
-          {/* Menu items grid */}
-          <div style={{ flex: 1, overflowY: "auto", padding: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 10, alignContent: "start" }}>
+          {/* Menu grid */}
+          <div style={{ flex:1, overflowY:"auto", padding: isMobile?10:14, display:"grid", gridTemplateColumns:`repeat(auto-fill,minmax(${isMobile?"130px":"155px"},1fr))`, gap:8, alignContent:"start", paddingBottom: isMobile?80:14 }}>
             {visible.map(m => {
-              const inCart = items.find(i => i.menuId === m.id);
+              const inCart = items.find(i=>i.menuId===m.id);
               return (
-                <button key={m.id} onClick={() => addItem(m)} style={{
-                  background: inCart ? C.accent + "22" : C.card,
-                  border: `2px solid ${inCart ? C.accent : C.border}`,
-                  borderRadius: 12, padding: "14px 10px", cursor: "pointer", textAlign: "left",
-                  transition: "all .12s", position: "relative",
-                  transform: inCart ? "scale(1.02)" : "scale(1)",
+                <button key={m.id} onClick={()=>addItem(m)} style={{
+                  background:inCart?C.accent+"22":C.card, border:`2px solid ${inCart?C.accent:C.border}`,
+                  borderRadius:12, padding: isMobile?"12px 8px":"13px 10px", cursor:"pointer", textAlign:"left",
+                  transition:"all .12s", position:"relative", transform:inCart?"scale(1.02)":"scale(1)"
                 }}>
-                  {inCart && (
-                    <div style={{
-                      position: "absolute", top: -8, right: -8,
-                      background: C.accent, color: C.bg,
-                      borderRadius: "50%", width: 22, height: 22,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontSize: 12, fontWeight: 700
-                    }}>{inCart.qty}</div>
-                  )}
-                  <div style={{ fontSize: 13, fontWeight: 600, color: C.cream, marginBottom: 4, lineHeight: 1.3 }}>{m.name}</div>
-                  {m.tag && <div style={{ fontSize: 10, color: C.muted, marginBottom: 6 }}>[{m.tag}]</div>}
-                  <div style={{ color: C.accent, fontWeight: 700, fontSize: 15 }}>{inr(m.price)}</div>
+                  {inCart && <div style={{ position:"absolute", top:-8, right:-8, background:C.accent, color:C.bg, borderRadius:"50%", width:22, height:22, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700 }}>{inCart.qty}</div>}
+                  <div style={{ fontSize:13, fontWeight:600, marginBottom:3, lineHeight:1.3 }}>{m.name}</div>
+                  {m.tag && <div style={{ fontSize:10, color:C.muted, marginBottom:4 }}>[{m.tag}]</div>}
+                  <div style={{ color:C.accent, fontWeight:700, fontSize:14 }}>{inr(m.price)}</div>
                 </button>
               );
             })}
-            {visible.length === 0 && <div style={{ gridColumn: "1/-1", color: C.muted, textAlign: "center", padding: 40, fontSize: 13 }}>No items found</div>}
+            {visible.length === 0 && <div style={{ gridColumn:"1/-1", color:C.muted, textAlign:"center", padding:40, fontSize:13 }}>No items found</div>}
           </div>
         </div>
 
-        {/* Right — order panel */}
-        <div style={{ width: 320, display: "flex", flexDirection: "column", overflow: "hidden", flexShrink: 0 }}>
-          <div style={{ padding: "12px 14px", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
-            <div style={{ fontSize: 11, color: C.muted, fontWeight: 700, letterSpacing: .5, marginBottom: 8 }}>TABLE</div>
-            <select value={tableId} onChange={e => setTableId(e.target.value)} style={{ fontSize: 13, marginBottom: 8 }}>
-              <option value="">Select table...</option>
-              {data.tables.filter(t => t.status !== "reserved").map(t => (
-                <option key={t.id} value={t.id}>Table {t.number} ({t.status})</option>
-              ))}
-            </select>
-            <input value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Customer name (optional)" style={{ fontSize: 12, marginBottom: 6 }} />
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder="Kitchen note..." style={{ fontSize: 12 }} />
-          </div>
-
-          {/* Cart items */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
-            {items.length === 0
-              ? <div style={{ color: C.muted, textAlign: "center", fontSize: 13, paddingTop: 40 }}>← Tap items to add</div>
-              : items.map(item => (
-                <div key={item.menuId} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 0", borderBottom: `1px solid ${C.border}22` }}>
-                  <div style={{ flex: 1, fontSize: 12, fontWeight: 500 }}>{item.name}</div>
-                  <button onClick={() => chQty(item.menuId, -1)} style={{ width: 26, height: 26, borderRadius: 6, background: C.border, color: C.cream, border: "none", cursor: "pointer", fontSize: 15 }}>−</button>
-                  <span style={{ fontSize: 13, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{item.qty}</span>
-                  <button onClick={() => chQty(item.menuId, 1)} style={{ width: 26, height: 26, borderRadius: 6, background: C.border, color: C.cream, border: "none", cursor: "pointer", fontSize: 15 }}>+</button>
-                  <span style={{ color: C.accent, fontWeight: 600, fontSize: 12, minWidth: 48, textAlign: "right" }}>{inr(item.qty * item.price)}</span>
-                  <button onClick={() => removeItem(item.menuId)} style={{ width: 22, height: 22, borderRadius: 5, background: C.red + "22", color: C.red, border: "none", cursor: "pointer", fontSize: 11 }}>✕</button>
+        {/* Desktop: Order panel (right sidebar) */}
+        {!isMobile && (
+          <div style={{ width:300, display:"flex", flexDirection:"column", overflow:"hidden", flexShrink:0 }}>
+            <div style={{ padding:"12px 14px", borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700, letterSpacing:.5, marginBottom:6 }}>TABLE</div>
+              <select value={tableId} onChange={e=>setTableId(e.target.value)} style={{ fontSize:13, marginBottom:7 }}>
+                <option value="">Select table...</option>
+                {data.tables.filter(t=>t.status!=="reserved").map(t=>(
+                  <option key={t.id} value={t.id}>Table {t.number} ({t.status})</option>
+                ))}
+              </select>
+              <input value={customerName} onChange={e=>setCustomerName(e.target.value)} placeholder="Customer name (optional)" style={{ fontSize:12, marginBottom:6 }} />
+              <input value={note} onChange={e=>setNote(e.target.value)} placeholder="Kitchen note..." style={{ fontSize:12, marginBottom:6 }} />
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ fontSize:11, color:C.muted, fontWeight:600, whiteSpace:"nowrap" }}>DISCOUNT %</div>
+                <input type="number" value={discount} onChange={e=>setDiscount(Math.min(100,Math.max(0,+e.target.value)))} min={0} max={100} style={{ fontSize:12, width:64 }} />
+              </div>
+            </div>
+            <div style={{ flex:1, overflowY:"auto", padding:"8px 14px" }}>
+              {items.length===0
+                ? <div style={{ color:C.muted, textAlign:"center", fontSize:13, paddingTop:36 }}>← Tap items to add</div>
+                : items.map(item=>(
+                  <div key={item.menuId} style={{ display:"flex", alignItems:"center", gap:5, padding:"6px 0", borderBottom:`1px solid ${C.border}22` }}>
+                    <div style={{ flex:1, fontSize:12, fontWeight:500 }}>{item.name}</div>
+                    <button onClick={()=>chQty(item.menuId,-1)} style={{ width:24, height:24, borderRadius:5, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:14 }}>−</button>
+                    <span style={{ fontSize:12, fontWeight:700, minWidth:16, textAlign:"center" }}>{item.qty}</span>
+                    <button onClick={()=>chQty(item.menuId,1)} style={{ width:24, height:24, borderRadius:5, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:14 }}>+</button>
+                    <span style={{ color:C.accent, fontWeight:600, fontSize:12, minWidth:46, textAlign:"right" }}>{inr(item.qty*item.price)}</span>
+                    <button onClick={()=>removeItem(item.menuId)} style={{ width:20, height:20, borderRadius:4, background:C.red+"22", color:C.red, border:"none", cursor:"pointer", fontSize:10 }}>✕</button>
+                  </div>
+                ))
+              }
+            </div>
+            <div style={{ padding:"12px 14px", borderTop:`1px solid ${C.border}`, flexShrink:0 }}>
+              {items.length > 0 && (
+                <div style={{ marginBottom:10, fontSize:12 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", color:C.muted, marginBottom:2 }}><span>Subtotal</span><span>{inr(subtotal)}</span></div>
+                  {discAmt>0 && <div style={{ display:"flex", justifyContent:"space-between", color:C.green, marginBottom:2 }}><span>Discount ({discount}%)</span><span>−{inr(discAmt)}</span></div>}
+                  <div style={{ display:"flex", justifyContent:"space-between", color:C.muted, marginBottom:4 }}><span>GST (18%)</span><span>{inr(tax)}</span></div>
+                  <div style={{ display:"flex", justifyContent:"space-between", fontWeight:700, color:C.accent, fontSize:16, borderTop:`1px solid ${C.border}`, paddingTop:6 }}><span>Total</span><span>{inr(total)}</span></div>
                 </div>
-              ))
-            }
+              )}
+              <button onClick={placeOrder} disabled={!canPlace} style={{
+                width:"100%", padding:"13px", borderRadius:11, border:"none", cursor:canPlace?"pointer":"not-allowed",
+                background:placed?C.green:canPlace?C.accent:C.border,
+                color:canPlace?C.bg:C.muted, fontWeight:700, fontSize:15, transition:"all .2s"
+              }}>
+                {placed?"✅ Order Placed!":"⚡ Place Order"}
+              </button>
+            </div>
           </div>
+        )}
 
-          {/* Totals + place button */}
-          <div style={{ padding: "12px 14px", borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
-            {items.length > 0 && (
-              <div style={{ marginBottom: 10, fontSize: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", color: C.muted, marginBottom: 3 }}><span>Subtotal</span><span>{inr(subtotal)}</span></div>
-                <div style={{ display: "flex", justifyContent: "space-between", color: C.muted, marginBottom: 3 }}><span>GST (18%)</span><span>{inr(tax)}</span></div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, color: C.accent, fontSize: 16, borderTop: `1px solid ${C.border}`, paddingTop: 6, marginTop: 4 }}><span>Total</span><span>{inr(total)}</span></div>
+        {/* Mobile: floating cart button + slide-up cart sheet */}
+        {isMobile && (
+          <>
+            {cartCount > 0 && !showCart && (
+              <button onClick={()=>setShowCart(true)} style={{
+                position:"absolute", bottom:16, left:"50%", transform:"translateX(-50%)",
+                background:C.accent, color:C.bg, border:"none", borderRadius:30,
+                padding:"12px 28px", fontSize:14, fontWeight:800, cursor:"pointer",
+                boxShadow:`0 4px 20px ${C.accent}66`, zIndex:50,
+                display:"flex", alignItems:"center", gap:10, whiteSpace:"nowrap"
+              }}>
+                🛒 View Cart ({cartCount}) · {inr(subtotal)}
+              </button>
+            )}
+            {showCart && (
+              <div style={{
+                position:"absolute", inset:0, zIndex:100,
+                background:C.bg, display:"flex", flexDirection:"column"
+              }}>
+                <div style={{ display:"flex", alignItems:"center", padding:"12px 14px", background:C.surface, borderBottom:`1px solid ${C.border}`, flexShrink:0 }}>
+                  <button onClick={()=>setShowCart(false)} style={{ background:"none", color:C.muted, border:"none", fontSize:20, cursor:"pointer", marginRight:10 }}>←</button>
+                  <div className="playfair" style={{ fontSize:16, fontWeight:700 }}>Your Cart</div>
+                </div>
+                <div style={{ flex:1, overflowY:"auto", padding:"12px 14px" }}>
+                  {/* Table & details */}
+                  <div style={{ marginBottom:14 }}>
+                    <div style={{ fontSize:11, color:C.muted, fontWeight:600, marginBottom:6 }}>TABLE</div>
+                    <select value={tableId} onChange={e=>setTableId(e.target.value)} style={{ fontSize:13, marginBottom:8 }}>
+                      <option value="">Select table...</option>
+                      {data.tables.filter(t=>t.status!=="reserved").map(t=>(
+                        <option key={t.id} value={t.id}>Table {t.number} ({t.status})</option>
+                      ))}
+                    </select>
+                    <input value={customerName} onChange={e=>setCustomerName(e.target.value)} placeholder="Customer name (optional)" style={{ fontSize:13, marginBottom:8 }} />
+                    <input value={note} onChange={e=>setNote(e.target.value)} placeholder="Kitchen note..." style={{ fontSize:13, marginBottom:8 }} />
+                    <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                      <span style={{ fontSize:12, color:C.muted, fontWeight:600 }}>DISCOUNT %</span>
+                      <input type="number" value={discount} onChange={e=>setDiscount(Math.min(100,Math.max(0,+e.target.value)))} style={{ width:64, fontSize:13 }} />
+                    </div>
+                  </div>
+                  {/* Cart items */}
+                  {items.map(item=>(
+                    <div key={item.menuId} style={{ display:"flex", alignItems:"center", gap:8, padding:"9px 0", borderBottom:`1px solid ${C.border}22` }}>
+                      <div style={{ flex:1, fontSize:13, fontWeight:500 }}>{item.name}</div>
+                      <button onClick={()=>chQty(item.menuId,-1)} style={{ width:30, height:30, borderRadius:7, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:16 }}>−</button>
+                      <span style={{ fontWeight:700, minWidth:20, textAlign:"center" }}>{item.qty}</span>
+                      <button onClick={()=>chQty(item.menuId,1)} style={{ width:30, height:30, borderRadius:7, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:16 }}>+</button>
+                      <span style={{ color:C.accent, fontWeight:600, fontSize:13, minWidth:54, textAlign:"right" }}>{inr(item.qty*item.price)}</span>
+                      <button onClick={()=>removeItem(item.menuId)} style={{ width:26, height:26, borderRadius:6, background:C.red+"22", color:C.red, border:"none", cursor:"pointer", fontSize:12 }}>✕</button>
+                    </div>
+                  ))}
+                  {/* Totals */}
+                  <div style={{ marginTop:16, padding:"12px", background:C.card, borderRadius:12, border:`1px solid ${C.border}` }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.muted, marginBottom:4 }}><span>Subtotal</span><span>{inr(subtotal)}</span></div>
+                    {discAmt>0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.green, marginBottom:4 }}><span>Discount ({discount}%)</span><span>−{inr(discAmt)}</span></div>}
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.muted, marginBottom:8 }}><span>GST (18%)</span><span>{inr(tax)}</span></div>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:18, fontWeight:800, color:C.accent }}><span>Total</span><span>{inr(total)}</span></div>
+                  </div>
+                </div>
+                <div style={{ padding:"12px 14px", borderTop:`1px solid ${C.border}`, flexShrink:0 }}>
+                  <button onClick={placeOrder} disabled={!canPlace} style={{
+                    width:"100%", padding:"15px", borderRadius:12, border:"none", fontSize:16, fontWeight:800,
+                    cursor:canPlace?"pointer":"not-allowed", background:placed?C.green:canPlace?C.accent:C.border, color:canPlace?C.bg:C.muted
+                  }}>
+                    {placed?"✅ Order Placed!":"⚡ Place Order"}
+                  </button>
+                </div>
               </div>
             )}
-            <button onClick={placeOrder} disabled={!canPlace} style={{
-              width: "100%", padding: "14px", borderRadius: 12, border: "none", cursor: canPlace ? "pointer" : "not-allowed",
-              background: placed ? C.green : canPlace ? C.accent : C.border,
-              color: canPlace ? C.bg : C.muted, fontWeight: 700, fontSize: 15,
-              transition: "all .2s", transform: placed ? "scale(0.97)" : "scale(1)"
-            }}>
-              {placed ? "✅ Order Placed!" : "⚡ Place Order"}
-            </button>
-          </div>
-        </div>
+          </>
+        )}
       </div>
     </div>
   );
