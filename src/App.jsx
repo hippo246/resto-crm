@@ -1167,8 +1167,8 @@ ${order.note ? `<div class="order-note">📝 NOTE: ${order.note}</div>` : ''}
 }
 
 const PERMS = {
-  admin:{tabs:["dashboard","tables","orders","orderboard","menu","combos","qrordering","reservations","staff","customers","expenses","deliveries","inventory","analytics","settings"],canEditMenu:true,canEditStaff:true,canEditUsers:true,canDelete:true,canSeeFinancials:true},
-  manager:{tabs:["dashboard","tables","orders","orderboard","menu","combos","qrordering","reservations","staff","customers","expenses","deliveries","inventory","analytics"],canEditMenu:true,canEditStaff:true,canEditUsers:false,canDelete:true,canSeeFinancials:true},
+  admin:{tabs:["dashboard","tables","orders","orderboard","menu","combos","qrordering","reservations","staff","customers","expenses","deliveries","inventory","wastage","analytics","settings"],canEditMenu:true,canEditStaff:true,canEditUsers:true,canDelete:true,canSeeFinancials:true},
+  manager:{tabs:["dashboard","tables","orders","orderboard","menu","combos","qrordering","reservations","staff","customers","expenses","deliveries","inventory","wastage","analytics"],canEditMenu:true,canEditStaff:true,canEditUsers:false,canDelete:true,canSeeFinancials:true},
   waiter:{tabs:["dashboard","tables","orders","orderboard","reservations","customers","inventory"],canEditMenu:false,canEditStaff:false,canEditUsers:false,canDelete:false,canSeeFinancials:false},
   kitchen:{tabs:["kitchen"],canEditMenu:false,canEditStaff:false,canEditUsers:false,canDelete:false,canSeeFinancials:false},
 };
@@ -8944,30 +8944,94 @@ function Settings({data,setData,users,setUsers,activeThemeId,onThemeChange,sess,
     </div>}
 
     {/* ══ TAB ACCESS CONTROL ══ */}
-    {sTab==="tabs"&&<div className="fade-in">
-      <div style={{color:C.muted,fontSize:12,marginBottom:14}}>Control which tabs each role can access. Changes take effect on next login.</div>
-      {["manager","waiter","kitchen"].map(role=>{
-        const defaults={manager:["dashboard","tables","orders","menu","reservations","staff","customers","expenses","deliveries","analytics","wastage"],waiter:["dashboard","tables","orders","reservations","customers"],kitchen:["kitchen"]};
-        const current=roleTabOverrides?.[role]||PERMS[role]?.tabs||defaults[role]||[];
-        return <Card key={role} style={{marginBottom:12}}>
-          <div style={{fontWeight:600,fontSize:13,marginBottom:10,display:"flex",gap:8,alignItems:"center"}}>
-            <Badge label={role} color={roleColor[role]}/> Tab Access
+    {sTab==="tabs"&&(()=>{
+      const ALL_ROLE_TABS = ALL_TABS; // full list including kitchen
+      const roles = ["admin","manager","waiter","kitchen"];
+      const roleDefaults = {
+        admin:   PERMS.admin.tabs,
+        manager: PERMS.manager.tabs,
+        waiter:  PERMS.waiter.tabs,
+        kitchen: PERMS.kitchen.tabs,
+      };
+      return <div className="fade-in">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,flexWrap:"wrap",gap:8}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:15,color:C.cream}}>📑 Tab Access Control</div>
+            <div style={{color:C.muted,fontSize:12,marginTop:3}}>Toggle which tabs each role can see. Changes apply on next login.</div>
           </div>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-            {["dashboard","tables","orders","menu","reservations","staff","customers","expenses","deliveries","wastage","analytics"].map(tabId=>{
-              const on=current.includes(tabId);
-              return <button key={tabId} onClick={()=>{
-                const next=on?current.filter(x=>x!==tabId):[...current,tabId];
-                setRoleTabOverrides(prev=>({...prev,[role]:next}));
-                addLog(sess?.name||"Admin",`${on?"Removed":"Added"} tab for ${role}`,tabId);
-              }} style={{padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:on?600:400,background:on?roleColor[role]+"22":"transparent",color:on?roleColor[role]:C.muted,border:`1px solid ${on?roleColor[role]+"44":C.border}`,transition:"all .12s"}}>
-                {on?"✓ ":""}{tabId}
-              </button>;
-            })}
-          </div>
-        </Card>;
-      })}
-    </div>}
+          <Btn size="sm" variant="ghost" onClick={()=>{
+            if(!window.confirm("Reset all tab access to defaults?"))return;
+            setRoleTabOverrides({});
+            addLog(sess?.name||"Admin","Reset tab access","All roles reset to defaults");
+          }}>↺ Reset All to Defaults</Btn>
+        </div>
+
+        {roles.map(role=>{
+          const current = roleTabOverrides?.[role] || roleDefaults[role] || [];
+          const isOverridden = !!roleTabOverrides?.[role];
+          const allOn = ALL_ROLE_TABS.every(t=>current.includes(t.id));
+          const toggleAll = () => {
+            const next = allOn ? roleDefaults[role] : ALL_ROLE_TABS.map(t=>t.id);
+            setRoleTabOverrides(prev=>({...prev,[role]:next}));
+            addLog(sess?.name||"Admin",allOn?"Reset tabs for "+role:"Enabled all tabs for "+role,"");
+          };
+          return <Card key={role} style={{marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <Badge label={role} color={roleColor[role]}/>
+                <span style={{fontSize:13,fontWeight:600,color:C.cream}}>Tab Access</span>
+                {isOverridden&&<span style={{fontSize:10,color:C.orange,background:C.orange+"18",border:`1px solid ${C.orange}44`,borderRadius:10,padding:"1px 7px",fontWeight:600}}>CUSTOM</span>}
+              </div>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={toggleAll} style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:C.accent+"18",color:C.accent,border:`1px solid ${C.accent}44`,cursor:"pointer",fontWeight:600}}>
+                  {allOn?"↺ Reset":"⊕ All"}
+                </button>
+                {isOverridden&&<button onClick={()=>{
+                  setRoleTabOverrides(prev=>{const n={...prev};delete n[role];return n;});
+                  addLog(sess?.name||"Admin","Reset tab access for "+role,"Restored defaults");
+                }} style={{fontSize:11,padding:"3px 10px",borderRadius:6,background:C.red+"18",color:C.red,border:`1px solid ${C.red}44`,cursor:"pointer",fontWeight:600}}>
+                  ↺ Reset Role
+                </button>}
+              </div>
+            </div>
+
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(130px,1fr))",gap:6}}>
+              {ALL_ROLE_TABS.map(t=>{
+                const on = current.includes(t.id);
+                const isDefault = roleDefaults[role]?.includes(t.id);
+                return <button key={t.id} onClick={()=>{
+                  const next = on ? current.filter(x=>x!==t.id) : [...current, t.id];
+                  setRoleTabOverrides(prev=>({...prev,[role]:next}));
+                  addLog(sess?.name||"Admin",`${on?"Removed":"Added"} tab for ${role}`,t.id);
+                }} style={{
+                  display:"flex",alignItems:"center",gap:7,
+                  padding:"7px 10px",borderRadius:8,
+                  background:on?roleColor[role]+"22":"transparent",
+                  color:on?roleColor[role]:C.muted,
+                  border:`1px solid ${on?roleColor[role]+"55":C.border}`,
+                  fontSize:12,fontWeight:on?600:400,
+                  transition:"all .12s",cursor:"pointer",textAlign:"left",
+                  position:"relative",
+                }}>
+                  <span style={{fontSize:14}}>{t.icon}</span>
+                  <span style={{flex:1,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.label}</span>
+                  {on&&<span style={{fontSize:10,color:roleColor[role],flexShrink:0}}>✓</span>}
+                  {!isDefault&&on&&<span style={{position:"absolute",top:2,right:2,width:5,height:5,borderRadius:"50%",background:C.orange}}/>}
+                </button>;
+              })}
+            </div>
+
+            <div style={{marginTop:10,fontSize:11,color:C.muted,display:"flex",gap:12,flexWrap:"wrap"}}>
+              <span>✓ <strong style={{color:C.cream}}>{current.length}</strong> of {ALL_ROLE_TABS.length} tabs enabled</span>
+              <span style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{width:6,height:6,borderRadius:"50%",background:C.orange,display:"inline-block"}}/>
+                = added beyond default
+              </span>
+            </div>
+          </Card>;
+        })}
+      </div>;
+    })()}
 
     {/* ══ STATIONS & TAX ══ */}
     {sTab==="stations"&&<div className="fade-in">
@@ -9250,7 +9314,7 @@ export default function App(){
   const activeBranchId=useBranch();
   const [users,setUsers]=useStore("rcm_users",D_USERS);
   const [data,setData]=useStore(`rcm_branch_${activeBranchId}_data`,D_DATA);
-  const [sess,setSess]=useState(()=>loadSession(D_USERS)); // restore session on reload
+  const [sess,setSess]=useState(()=>loadSession(JSON.parse(localStorage.getItem(`rcm_users`)||"null")||D_USERS));
   const [tab,setTab]=useState("dashboard");
   const [sideOpen,setSideOpen]=useState(true);
   const [activeThemeId,setActiveThemeId]=useState(_savedThemeId);
@@ -9332,6 +9396,18 @@ export default function App(){
 
   const doLogout=()=>{clearSession();setSess(null);};
 
+  // Use roleTabOverrides if set, otherwise fall back to PERMS
+  const basePerms=PERMS[sess?.role]||PERMS.waiter;
+  const overriddenTabs=roleTabOverrides[sess?.role];
+  const perms=overriddenTabs?{...basePerms,tabs:overriddenTabs}:basePerms;
+
+  const visibleTabs=ALL_TABS.filter(t=>perms.tabs.includes(t.id));
+  const roleColor={admin:C.accent,manager:C.blue,waiter:C.green,kitchen:C.red};
+  const tp={data,setData,perms,sess,activeWaiter};
+
+  // Auto-collapse sidebar on tablet — must be before any conditional returns (Rules of Hooks)
+  useEffect(() => { if (isTablet && !isMobile) setSideOpen(false); }, [isTablet, isMobile]);
+
   if(!sess)return <Login users={users} onLogin={u=>{
     saveSession(u);setSess(u);setTab(u.role==="kitchen"?"kitchen":"dashboard");
     // Track login stats
@@ -9339,19 +9415,7 @@ export default function App(){
     addLog(u.name,"Login",`${u.role} signed in`);
   }}/>;
 
-  // Use roleTabOverrides if set, otherwise fall back to PERMS
-  const basePerms=PERMS[sess.role]||PERMS.waiter;
-  const overriddenTabs=roleTabOverrides[sess.role];
-  const perms=overriddenTabs?{...basePerms,tabs:overriddenTabs}:basePerms;
-
   if(sess.role==="kitchen")return <KitchenDisplay data={data} setData={setData} onLogout={doLogout}/>;
-
-  const visibleTabs=ALL_TABS.filter(t=>perms.tabs.includes(t.id));
-  const roleColor={admin:C.accent,manager:C.blue,waiter:C.green,kitchen:C.red};
-  const tp={data,setData,perms,sess,activeWaiter};
-
-  // Auto-collapse sidebar on tablet
-  useEffect(() => { if (isTablet && !isMobile) setSideOpen(false); }, [isTablet, isMobile]);
 
   return <>
     <style>{makeCss(C)}</style>
