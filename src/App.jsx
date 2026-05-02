@@ -930,8 +930,8 @@ ${order.note ? `<div class="order-note">📝 NOTE: ${order.note}</div>` : ''}
 }
 
 const PERMS = {
-  admin:{tabs:["dashboard","tables","orders","orderboard","menu","reservations","staff","customers","expenses","deliveries","inventory","analytics","settings"],canEditMenu:true,canEditStaff:true,canEditUsers:true,canDelete:true,canSeeFinancials:true},
-  manager:{tabs:["dashboard","tables","orders","orderboard","menu","reservations","staff","customers","expenses","deliveries","inventory","analytics"],canEditMenu:true,canEditStaff:true,canEditUsers:false,canDelete:true,canSeeFinancials:true},
+  admin:{tabs:["dashboard","tables","orders","orderboard","menu","combos","qrordering","reservations","staff","customers","expenses","deliveries","inventory","analytics","settings"],canEditMenu:true,canEditStaff:true,canEditUsers:true,canDelete:true,canSeeFinancials:true},
+  manager:{tabs:["dashboard","tables","orders","orderboard","menu","combos","qrordering","reservations","staff","customers","expenses","deliveries","inventory","analytics"],canEditMenu:true,canEditStaff:true,canEditUsers:false,canDelete:true,canSeeFinancials:true},
   waiter:{tabs:["dashboard","tables","orders","orderboard","reservations","customers","inventory"],canEditMenu:false,canEditStaff:false,canEditUsers:false,canDelete:false,canSeeFinancials:false},
   kitchen:{tabs:["kitchen"],canEditMenu:false,canEditStaff:false,canEditUsers:false,canDelete:false,canSeeFinancials:false},
 };
@@ -954,6 +954,10 @@ const D_DATA={
       {id:"st4",name:"Dessert Station",emoji:"🍮",categories:["Desserts","Ice Cream"],color:"#9b7fe8",active:true},
     ],
   },
+  combos:[
+    {id:"c1",name:"Thali Combo",emoji:"🍱",description:"Main + 2 Breads + Dessert",bundlePrice:520,available:true,items:[{menuId:"m1",qty:1},{menuId:"m3",qty:2},{menuId:"m5",qty:1}]},
+    {id:"c2",name:"Chai & Snack",emoji:"☕",description:"Paneer Tikka + Masala Chai",bundlePrice:299,available:true,items:[{menuId:"m7",qty:1},{menuId:"m4",qty:1}]},
+  ],
   tables:[
     {id:"t1",number:1,capacity:2,floor:"Ground",status:"available",note:""},
     {id:"t2",number:2,capacity:4,floor:"Ground",status:"occupied",note:""},
@@ -3486,6 +3490,84 @@ ${mode==="byItem"?`<h3>Item Assignment</h3>${order.items.map((item,ii)=>`<div cl
   </Modal>;
 }
 
+// ── MODIFIER PICKER ───────────────────────────────────────────
+function ModifierPicker({ menuItem, onConfirm, onClose }) {
+  useTheme();
+  const isMobile = useIsMobile();
+  const groups = menuItem.modifierGroups || [];
+  const [selected, setSelected] = useState(() => {
+    const s = {};
+    groups.forEach(g => { s[g.id] = []; });
+    return s;
+  });
+
+  const toggle = (gid, opt, type) => {
+    setSelected(prev => {
+      const cur = prev[gid] || [];
+      if (type === "single") return { ...prev, [gid]: cur.some(o=>o.id===opt.id) ? [] : [opt] };
+      return { ...prev, [gid]: cur.some(o=>o.id===opt.id) ? cur.filter(o=>o.id!==opt.id) : [...cur, opt] };
+    });
+  };
+
+  const extraTotal = Object.values(selected).flat().reduce((s,o)=>s+(+o.price||0),0);
+  const selectedList = Object.values(selected).flat();
+
+  if (groups.length === 0) { onConfirm([], 0); return null; }
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#000c",zIndex:1100,display:"flex",alignItems:isMobile?"flex-end":"center",justifyContent:"center",padding:isMobile?0:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="fade-in" style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:isMobile?"20px 20px 0 0":14,width:"100%",maxWidth:420,maxHeight:isMobile?"85dvh":"80vh",display:"flex",flexDirection:"column"}}>
+        <div style={{padding:"14px 18px",borderBottom:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+          <div>
+            <div className="playfair" style={{fontSize:16,fontWeight:600}}>{menuItem.name}</div>
+            <div style={{fontSize:12,color:C.muted,marginTop:1}}>Customise your order</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",color:C.muted,fontSize:18,border:"none",cursor:"pointer"}}>✕</button>
+        </div>
+        <div style={{padding:16,overflowY:"auto",flex:1}}>
+          {groups.map(grp => (
+            <div key={grp.id} style={{marginBottom:16}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.muted,letterSpacing:.5,marginBottom:8}}>
+                {grp.name.toUpperCase()} {grp.type==="single"?"(choose one)":"(optional)"}
+              </div>
+              <div style={{display:"grid",gap:6}}>
+                {(grp.options||[]).map(opt => {
+                  const on = (selected[grp.id]||[]).some(o=>o.id===opt.id);
+                  return (
+                    <button key={opt.id} onClick={()=>toggle(grp.id,opt,grp.type)} style={{
+                      display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"10px 14px",borderRadius:9,cursor:"pointer",textAlign:"left",
+                      background:on?C.accent+"22":C.surface,
+                      border:`1.5px solid ${on?C.accent:C.border}`,transition:"all .12s"
+                    }}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{width:18,height:18,borderRadius:grp.type==="single"?"50%":4,border:`2px solid ${on?C.accent:C.muted}`,background:on?C.accent:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          {on&&<span style={{color:C.bg,fontSize:11,fontWeight:700}}>✓</span>}
+                        </div>
+                        <span style={{fontSize:13,fontWeight:600,color:on?C.cream:C.cream}}>{opt.name}</span>
+                      </div>
+                      {(+opt.price||0)>0&&<span style={{color:C.accent,fontWeight:700,fontSize:13}}>+{inr(+opt.price)}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{padding:"12px 16px",borderTop:`1px solid ${C.border}`,flexShrink:0}}>
+          {extraTotal>0&&<div style={{fontSize:12,color:C.muted,marginBottom:8}}>Extra: <span style={{color:C.accent,fontWeight:700}}>+{inr(extraTotal)}</span></div>}
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>onConfirm([],0)} style={{flex:1,padding:"11px",borderRadius:10,border:`1px solid ${C.border}`,background:"transparent",color:C.muted,cursor:"pointer",fontSize:13,fontWeight:600}}>Skip</button>
+            <button onClick={()=>onConfirm(selectedList,extraTotal)} style={{flex:2,padding:"11px",borderRadius:10,border:"none",background:C.accent,color:C.bg,cursor:"pointer",fontSize:13,fontWeight:700}}>
+              Add to Order {extraTotal>0?`(+${inr(extraTotal)})`:""}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── QUICK POS / RUSH MODE ─────────────────────────────────────
 function QuickPOS({ data, setData, onClose }) {
   useTheme();
@@ -3792,6 +3874,7 @@ function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
   const [search, setSearch] = useState("");
   const [placed, setPlaced] = useState(false);
   const [showCart, setShowCart] = useState(false); // mobile cart toggle
+  const [modifierTarget, setModifierTarget] = useState(null); // {menuItem}
   const searchRef = useRef(null);
 
   useEffect(() => { if (!isMobile) searchRef.current?.focus(); }, []);
@@ -3801,18 +3884,39 @@ function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
     return () => window.removeEventListener("keydown", fn);
   }, [onClose]);
 
-  const cats = ["All", ...new Set(data.menu.map(m => m.category))];
+  const cats = ["All", "🍱 Combos", ...new Set(data.menu.map(m => m.category))];
+  const combos = (data.combos || []).filter(c => c.available !== false && (!search || c.name.toLowerCase().includes(search.toLowerCase())));
   const visible = data.menu.filter(m =>
     m.available &&
-    (catFilter === "All" || m.category === catFilter) &&
+    (catFilter === "All" || catFilter === "🍱 Combos" || m.category === catFilter) &&
     (!search || m.name.toLowerCase().includes(search.toLowerCase()))
   );
 
-  const addItem = m => setItems(prev => {
-    const ex = prev.find(i => i.menuId === m.id);
-    if (ex) return prev.map(i => i.menuId === m.id ? { ...i, qty: i.qty + 1 } : i);
-    return [...prev, { menuId: m.id, name: m.name, qty: 1, price: m.price }];
-  });
+  const addCombo = combo => {
+    setItems(prev => {
+      const ex = prev.find(i => i.comboId === combo.id);
+      if (ex) return prev.map(i => i.comboId === combo.id ? { ...i, qty: i.qty + 1 } : i);
+      return [...prev, { comboId: combo.id, menuId: combo.id, name: combo.name + " " + (combo.emoji||"🍱"), qty: 1, price: combo.bundlePrice, isCombo: true }];
+    });
+  };
+
+  const addItem = m => {
+    if (m.modifierGroups && m.modifierGroups.length > 0) { setModifierTarget(m); return; }
+    setItems(prev => {
+      const ex = prev.find(i => i.menuId === m.id && !i.modifiers?.length);
+      if (ex) return prev.map(i => (i.menuId === m.id && !i.modifiers?.length) ? { ...i, qty: i.qty + 1 } : i);
+      return [...prev, { menuId: m.id, name: m.name, qty: 1, price: m.price }];
+    });
+  };
+  const addItemWithModifiers = (m, modifiers, extraPrice) => {
+    setModifierTarget(null);
+    const key = JSON.stringify(modifiers.map(o=>o.id).sort());
+    setItems(prev => {
+      const ex = prev.find(i => i.menuId === m.id && JSON.stringify((i.modifierExtras||[]).map(o=>o.id).sort()) === key);
+      if (ex) return prev.map(i => (i.menuId === m.id && JSON.stringify((i.modifierExtras||[]).map(o=>o.id).sort()) === key) ? { ...i, qty: i.qty + 1 } : i);
+      return [...prev, { menuId: m.id, name: m.name, qty: 1, price: m.price + extraPrice, basePrice: m.price, modifiers: modifiers.map(o=>o.name), modifierExtras: modifiers }];
+    });
+  };
   const removeItem = menuId => setItems(prev => prev.filter(i => i.menuId !== menuId));
   const chQty = (menuId, delta) => setItems(prev =>
     prev.map(i => i.menuId === menuId ? { ...i, qty: Math.max(0, i.qty + delta) } : i).filter(i => i.qty > 0)
@@ -3877,8 +3981,29 @@ function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
           </div>
           {/* Menu grid */}
           <div style={{ flex:1, overflowY:"auto", padding: isMobile?10:14, display:"grid", gridTemplateColumns:`repeat(auto-fill,minmax(${isMobile?"130px":"155px"},1fr))`, gap:8, alignContent:"start", paddingBottom: isMobile?80:14 }}>
-            {visible.map(m => {
-              const inCart = items.find(i=>i.menuId===m.id);
+            {/* Combo cards */}
+            {(catFilter==="All"||catFilter==="🍱 Combos")&&combos.map(combo => {
+              const inCart = items.find(i=>i.comboId===combo.id);
+              const origPrice = (combo.items||[]).reduce((s,ci)=>{const mi=data.menu.find(m=>m.id===ci.menuId);return s+(mi?mi.price*ci.qty:0);},0);
+              return (
+                <button key={combo.id} onClick={()=>addCombo(combo)} style={{
+                  background:inCart?C.purple+"22":C.card, border:`2px solid ${inCart?C.purple:C.purple+"55"}`,
+                  borderRadius:12, padding: isMobile?"12px 8px":"13px 10px", cursor:"pointer", textAlign:"left",
+                  transition:"all .12s", position:"relative"
+                }}>
+                  {inCart && <div style={{ position:"absolute", top:-8, right:-8, background:C.purple, color:"#fff", borderRadius:"50%", width:22, height:22, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700 }}>{inCart.qty}</div>}
+                  <div style={{ fontSize:16, marginBottom:3 }}>{combo.emoji||"🍱"}</div>
+                  <div style={{ fontSize:12, fontWeight:700, marginBottom:2, lineHeight:1.3, color:C.purple }}>{combo.name}</div>
+                  {combo.description&&<div style={{fontSize:10,color:C.muted,marginBottom:4,lineHeight:1.3}}>{combo.description}</div>}
+                  <div style={{ display:"flex", flexDirection:"column", gap:1 }}>
+                    {origPrice>0&&<div style={{fontSize:10,color:C.muted,textDecoration:"line-through"}}>{inr(origPrice)}</div>}
+                    <div style={{ color:C.purple, fontWeight:700, fontSize:14 }}>{inr(combo.bundlePrice)}</div>
+                  </div>
+                </button>
+              );
+            })}
+            {catFilter!=="🍱 Combos"&&visible.map(m => {
+              const inCart = items.find(i=>i.menuId===m.id && !i.comboId);
               return (
                 <button key={m.id} onClick={()=>addItem(m)} style={{
                   background:inCart?C.accent+"22":C.card, border:`2px solid ${inCart?C.accent:C.border}`,
@@ -3892,7 +4017,8 @@ function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
                 </button>
               );
             })}
-            {visible.length === 0 && <div style={{ gridColumn:"1/-1", color:C.muted, textAlign:"center", padding:40, fontSize:13 }}>No items found</div>}
+            {catFilter==="🍱 Combos"&&combos.length===0&&<div style={{ gridColumn:"1/-1", color:C.muted, textAlign:"center", padding:40, fontSize:13 }}>No combos set up yet. Add them in Menu → Combos.</div>}
+            {catFilter!=="🍱 Combos"&&visible.length === 0 && <div style={{ gridColumn:"1/-1", color:C.muted, textAlign:"center", padding:40, fontSize:13 }}>No items found</div>}
           </div>
         </div>
 
@@ -3917,14 +4043,17 @@ function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
             <div style={{ flex:1, overflowY:"auto", padding:"8px 14px" }}>
               {items.length===0
                 ? <div style={{ color:C.muted, textAlign:"center", fontSize:13, paddingTop:36 }}>← Tap items to add</div>
-                : items.map(item=>(
-                  <div key={item.menuId} style={{ display:"flex", alignItems:"center", gap:5, padding:"6px 0", borderBottom:`1px solid ${C.border}22` }}>
-                    <div style={{ flex:1, fontSize:12, fontWeight:500 }}>{item.name}</div>
-                    <button onClick={()=>chQty(item.menuId,-1)} style={{ width:24, height:24, borderRadius:5, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:14 }}>−</button>
-                    <span style={{ fontSize:12, fontWeight:700, minWidth:16, textAlign:"center" }}>{item.qty}</span>
-                    <button onClick={()=>chQty(item.menuId,1)} style={{ width:24, height:24, borderRadius:5, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:14 }}>+</button>
-                    <span style={{ color:C.accent, fontWeight:600, fontSize:12, minWidth:46, textAlign:"right" }}>{inr(item.qty*item.price)}</span>
-                    <button onClick={()=>removeItem(item.menuId)} style={{ width:20, height:20, borderRadius:4, background:C.red+"22", color:C.red, border:"none", cursor:"pointer", fontSize:10 }}>✕</button>
+                : items.map((item,idx)=>(
+                  <div key={idx} style={{ padding:"6px 0", borderBottom:`1px solid ${C.border}22` }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+                      <div style={{ flex:1, fontSize:12, fontWeight:500 }}>{item.name}</div>
+                      <button onClick={()=>setItems(p=>p.map((x,i)=>i===idx?{...x,qty:Math.max(0,x.qty-1)}:x).filter(x=>x.qty>0))} style={{ width:24, height:24, borderRadius:5, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:14 }}>−</button>
+                      <span style={{ fontSize:12, fontWeight:700, minWidth:16, textAlign:"center" }}>{item.qty}</span>
+                      <button onClick={()=>setItems(p=>p.map((x,i)=>i===idx?{...x,qty:x.qty+1}:x))} style={{ width:24, height:24, borderRadius:5, background:C.border, color:C.cream, border:"none", cursor:"pointer", fontSize:14 }}>+</button>
+                      <span style={{ color:C.accent, fontWeight:600, fontSize:12, minWidth:46, textAlign:"right" }}>{inr(item.qty*item.price)}</span>
+                      <button onClick={()=>setItems(p=>p.filter((_,i)=>i!==idx))} style={{ width:20, height:20, borderRadius:4, background:C.red+"22", color:C.red, border:"none", cursor:"pointer", fontSize:10 }}>✕</button>
+                    </div>
+                    {item.modifiers&&item.modifiers.length>0&&<div style={{fontSize:10,color:C.accent,paddingLeft:4,marginTop:2}}>{item.modifiers.join(", ")}</div>}
                   </div>
                 ))
               }
@@ -3936,6 +4065,7 @@ function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
                   {discAmt>0 && <div style={{ display:"flex", justifyContent:"space-between", color:C.green, marginBottom:2 }}><span>Discount ({discount}%)</span><span>−{inr(discAmt)}</span></div>}
                   <div style={{ display:"flex", justifyContent:"space-between", color:C.muted, marginBottom:4 }}><span>GST (18%)</span><span>{inr(tax)}</span></div>
                   <div style={{ display:"flex", justifyContent:"space-between", fontWeight:700, color:C.accent, fontSize:16, borderTop:`1px solid ${C.border}`, paddingTop:6 }}><span>Total</span><span>{inr(total)}</span></div>
+                  {items.length>0&&(()=>{const est=getOrderEstimate({items},data.menu);return<div style={{marginTop:6,background:C.orange+"18",border:`1px solid ${C.orange}33`,borderRadius:7,padding:"5px 9px",fontSize:11,color:C.orange,display:"flex",alignItems:"center",gap:5}}>⏱ Est. wait: <strong>{est} min</strong></div>;})()}
                 </div>
               )}
               <button onClick={placeOrder} disabled={!canPlace} style={{
@@ -4022,6 +4152,7 @@ function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
         )}
       </div>
     </div>
+    {modifierTarget && <ModifierPicker menuItem={modifierTarget} onConfirm={(mods,extra)=>addItemWithModifiers(modifierTarget,mods,extra)} onClose={()=>setModifierTarget(null)} />}
   );
 }
 
@@ -4561,6 +4692,7 @@ function MenuItemModal({item, modal, onSave, onDelete, perms, onClose}) {
     scheduleSlots: item.scheduleSlots || [],
     scheduleEnabled: item.scheduleEnabled || false,
     variants: item.variants || [],
+    modifierGroups: item.modifierGroups || [],
     allergens: item.allergens || [],
     spiceLevel: item.spiceLevel || "none",
     isVeg: item.isVeg ?? false,
@@ -4570,7 +4702,7 @@ function MenuItemModal({item, modal, onSave, onDelete, perms, onClose}) {
   } : {
     name:"", category:"Mains", price:"", cost:"", description:"", tag:"",
     available:true, stock:"", lowStockAt:"", scheduleEnabled:false, scheduleSlots:[],
-    variants:[], allergens:[], spiceLevel:"none", isVeg:false, calories:"", preparationTime:"",
+    variants:[], modifierGroups:[], allergens:[], spiceLevel:"none", isVeg:false, calories:"", preparationTime:"",
     ingredients:[],
   });
   const sf = k => e => setForm(f => ({...f, [k]: e.target.value}));
@@ -4593,10 +4725,11 @@ function MenuItemModal({item, modal, onSave, onDelete, perms, onClose}) {
       calories: form.calories ? +form.calories : null,
       preparationTime: form.preparationTime ? +form.preparationTime : null,
       variants: form.variants.map(v=>({...v, price:+v.price||0})),
+      modifierGroups: form.modifierGroups.map(g=>({...g, options: g.options.map(o=>({...o, price:+o.price||0}))})),
     });
   };
 
-  const tabs = [{id:"basic",label:"📋 Basic"},{id:"ingredients",label:"🧄 Ingredients"},{id:"schedule",label:"🕐 Schedule"},{id:"variants",label:"🍴 Variants"},{id:"details",label:"ℹ️ Details"}];
+  const tabs = [{id:"basic",label:"📋 Basic"},{id:"ingredients",label:"🧄 Ingredients"},{id:"schedule",label:"🕐 Schedule"},{id:"variants",label:"🍴 Variants"},{id:"modifiers",label:"✏️ Modifiers"},{id:"details",label:"ℹ️ Details"}];
 
   return <Modal title={isNew ? "Add Menu Item" : `Edit — ${item?.name}`} onClose={onClose} wide>
     {/* Tab bar */}
@@ -4709,6 +4842,37 @@ function MenuItemModal({item, modal, onSave, onDelete, perms, onClose}) {
         </div>
       ))}
       <button onClick={addVariant} style={{fontSize:12,color:C.accent,background:C.accent+"11",border:`1px dashed ${C.accent}`,borderRadius:7,padding:"6px 14px",cursor:"pointer",width:"100%",marginTop:4}}>+ Add Variant</button>
+    </div>}
+
+    {/* ── MODIFIERS TAB ── */}
+    {tab==="modifiers"&&<div className="fade-in">
+      <div style={{fontSize:12,color:C.muted,marginBottom:12,lineHeight:1.6}}>
+        Add modifier groups (e.g. "Extras", "Add-ons"). Each option has a name and an extra charge. Guests can pick modifiers when ordering.
+      </div>
+      {(form.modifierGroups||[]).map((grp,gi)=>(
+        <div key={grp.id} style={{background:C.surface,borderRadius:10,padding:"10px 12px",marginBottom:10,border:`1px solid ${C.border}`}}>
+          <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:8}}>
+            <input value={grp.name} onChange={e=>setForm(f=>({...f,modifierGroups:f.modifierGroups.map((g,i)=>i===gi?{...g,name:e.target.value}:g)}))} placeholder="Group name (e.g. Extras)" style={{flex:1,fontSize:13,fontWeight:600}} />
+            <select value={grp.type||"multi"} onChange={e=>setForm(f=>({...f,modifierGroups:f.modifierGroups.map((g,i)=>i===gi?{...g,type:e.target.value}:g)}))} style={{fontSize:12,padding:"9px 8px",width:120}}>
+              <option value="multi">Multi-select</option>
+              <option value="single">Single-select</option>
+            </select>
+            <button onClick={()=>setForm(f=>({...f,modifierGroups:f.modifierGroups.filter((_,i)=>i!==gi)}))} style={{background:C.red+"22",color:C.red,border:"none",borderRadius:6,padding:"6px 10px",cursor:"pointer",fontSize:12}}>✕ Group</button>
+          </div>
+          {(grp.options||[]).map((opt,oi)=>(
+            <div key={opt.id} style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,marginBottom:6,alignItems:"center"}}>
+              <input value={opt.name} onChange={e=>setForm(f=>({...f,modifierGroups:f.modifierGroups.map((g,i)=>i!==gi?g:{...g,options:g.options.map((o,j)=>j===oi?{...o,name:e.target.value}:o)})}))} placeholder="Option name (e.g. Add Cheese)" style={{fontSize:12}} />
+              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                <span style={{fontSize:11,color:C.muted,flexShrink:0}}>+₹</span>
+                <input type="number" value={opt.price||""} onChange={e=>setForm(f=>({...f,modifierGroups:f.modifierGroups.map((g,i)=>i!==gi?g:{...g,options:g.options.map((o,j)=>j===oi?{...o,price:e.target.value}:o)})}))} placeholder="0" style={{fontSize:12,width:70}} />
+              </div>
+              <button onClick={()=>setForm(f=>({...f,modifierGroups:f.modifierGroups.map((g,i)=>i!==gi?g:{...g,options:g.options.filter((_,j)=>j!==oi)})}))} style={{background:C.red+"22",color:C.red,border:"none",borderRadius:6,padding:"6px 8px",cursor:"pointer",fontSize:11}}>✕</button>
+            </div>
+          ))}
+          <button onClick={()=>setForm(f=>({...f,modifierGroups:f.modifierGroups.map((g,i)=>i!==gi?g:{...g,options:[...(g.options||[]),{id:mkId(),name:"",price:""}]})}))} style={{fontSize:11,color:C.accent,background:C.accent+"11",border:`1px dashed ${C.accent}`,borderRadius:6,padding:"4px 12px",cursor:"pointer",width:"100%",marginTop:4}}>+ Add Option</button>
+        </div>
+      ))}
+      <button onClick={()=>setForm(f=>({...f,modifierGroups:[...(f.modifierGroups||[]),{id:mkId(),name:"",type:"multi",options:[]}]}))} style={{fontSize:12,color:C.accent,background:C.accent+"11",border:`1px dashed ${C.accent}`,borderRadius:7,padding:"6px 14px",cursor:"pointer",width:"100%",marginTop:4}}>+ Add Modifier Group</button>
     </div>}
 
     {/* ── DETAILS TAB ── */}
@@ -4955,6 +5119,351 @@ function Menu({data,setData,perms}){
       onClose={()=>{setModal(null);setSelected(null);}}
     />}
   </div>;
+}
+
+// ── COMBO MANAGER ─────────────────────────────────────────────
+function ComboManager({ data, setData, perms }) {
+  useTheme();
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState({ name:"", emoji:"🍱", description:"", bundlePrice:"", available:true, items:[] });
+  const combos = data.combos || [];
+
+  const openAdd = () => {
+    setForm({ name:"", emoji:"🍱", description:"", bundlePrice:"", available:true, items:[] });
+    setModal("add");
+  };
+  const openEdit = c => { setForm({...c, bundlePrice:String(c.bundlePrice)}); setModal("edit"); };
+
+  const save = () => {
+    if (!form.name.trim() || !form.bundlePrice) return alert("Name and bundle price required.");
+    const entry = { ...form, bundlePrice: +form.bundlePrice, id: form.id || mkId() };
+    if (modal === "add") setData(d => ({ ...d, combos: [...(d.combos||[]), entry] }));
+    else setData(d => ({ ...d, combos: (d.combos||[]).map(c => c.id === entry.id ? entry : c) }));
+    setModal(null);
+  };
+
+  const del = id => { setData(d => ({ ...d, combos: (d.combos||[]).filter(c => c.id !== id) })); setModal(null); };
+
+  const addComboItem = menuId => {
+    const mi = data.menu.find(m => m.id === menuId);
+    if (!mi) return;
+    setForm(f => ({ ...f, items: [...f.items, { menuId: mi.id, qty: 1 }] }));
+  };
+
+  const origPrice = (items) => (items||[]).reduce((s,ci)=>{ const mi=data.menu.find(m=>m.id===ci.menuId); return s+(mi?mi.price*ci.qty:0); }, 0);
+
+  return (
+    <div className="fade-in">
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <div>
+          <div className="playfair" style={{ fontSize:22, marginBottom:2 }}>🍱 Combo & Meal Deals</div>
+          <div style={{ color:C.muted, fontSize:12 }}>Bundle items at a set price. Appears in POS under "Combos".</div>
+        </div>
+        {perms.canEditMenu && <Btn onClick={openAdd}>+ New Combo</Btn>}
+      </div>
+
+      {combos.length === 0 && (
+        <Card style={{ textAlign:"center", padding:40, color:C.muted }}>
+          <div style={{ fontSize:32, marginBottom:8 }}>🍱</div>
+          <div style={{ fontSize:14, marginBottom:4 }}>No combos yet</div>
+          <div style={{ fontSize:12 }}>Create meal deals to bundle items at a special price.</div>
+        </Card>
+      )}
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))", gap:12 }}>
+        {combos.map(combo => {
+          const orig = origPrice(combo.items);
+          const saving = orig - combo.bundlePrice;
+          return (
+            <Card key={combo.id} style={{ opacity: combo.available ? 1 : 0.6 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{ fontSize:24 }}>{combo.emoji||"🍱"}</span>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:15 }}>{combo.name}</div>
+                    {combo.description && <div style={{ fontSize:11, color:C.muted, marginTop:1 }}>{combo.description}</div>}
+                  </div>
+                </div>
+                {perms.canEditMenu && <button onClick={()=>openEdit(combo)} style={{ background:"none", color:C.muted, fontSize:13, border:"none", cursor:"pointer" }}>✏️</button>}
+              </div>
+              <div style={{ display:"flex", gap:8, marginBottom:10, flexWrap:"wrap" }}>
+                {(combo.items||[]).map((ci,i) => {
+                  const mi = data.menu.find(m => m.id === ci.menuId);
+                  return mi ? <span key={i} style={{ background:C.surface, borderRadius:5, padding:"2px 8px", fontSize:11 }}>{mi.name} ×{ci.qty}</span> : null;
+                })}
+              </div>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <div>
+                  {orig > 0 && <div style={{ fontSize:11, color:C.muted, textDecoration:"line-through" }}>{inr(orig)}</div>}
+                  <div style={{ fontSize:18, fontWeight:700, color:C.accent }}>{inr(combo.bundlePrice)}</div>
+                  {saving > 0 && <div style={{ fontSize:11, color:C.green }}>Save {inr(saving)}</div>}
+                </div>
+                <Badge label={combo.available?"active":"off"} color={combo.available?C.green:C.muted} />
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {modal && (
+        <Modal title={modal==="add"?"New Combo Deal":"Edit Combo Deal"} onClose={()=>setModal(null)} wide>
+          <Row>
+            <Field label="EMOJI" half><input value={form.emoji} onChange={e=>setForm(f=>({...f,emoji:e.target.value}))} style={{fontSize:20}} /></Field>
+            <Field label="COMBO NAME" half><input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} placeholder="e.g. Family Feast" /></Field>
+          </Row>
+          <Field label="DESCRIPTION (shown in POS)"><input value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="e.g. 2 Mains + 3 Breads + Dessert" /></Field>
+          <Row>
+            <Field label="BUNDLE PRICE (₹)" half><input type="number" value={form.bundlePrice} onChange={e=>setForm(f=>({...f,bundlePrice:e.target.value}))} placeholder="0" /></Field>
+            <Field label="AVAILABLE" half>
+              <select value={form.available?"yes":"no"} onChange={e=>setForm(f=>({...f,available:e.target.value==="yes"}))}>
+                <option value="yes">✅ Active</option>
+                <option value="no">❌ Hidden</option>
+              </select>
+            </Field>
+          </Row>
+          <Divider />
+          <div style={{ fontWeight:600, fontSize:13, marginBottom:10 }}>Items in this combo</div>
+          {(form.items||[]).map((ci,i) => {
+            const mi = data.menu.find(m => m.id === ci.menuId);
+            return (
+              <div key={i} style={{ display:"flex", gap:8, alignItems:"center", marginBottom:6 }}>
+                <span style={{ flex:1, fontSize:13 }}>{mi?.name||"Unknown"}</span>
+                <input type="number" value={ci.qty} min="1" onChange={e=>setForm(f=>({...f,items:f.items.map((x,j)=>j===i?{...x,qty:+e.target.value}:x)}))} style={{ width:56, fontSize:12 }} />
+                <button onClick={()=>setForm(f=>({...f,items:f.items.filter((_,j)=>j!==i)}))} style={{ background:C.red+"22",color:C.red,border:"none",borderRadius:6,padding:"6px 10px",cursor:"pointer",fontSize:12 }}>✕</button>
+              </div>
+            );
+          })}
+          <select defaultValue="" onChange={e=>{ if(e.target.value) addComboItem(e.target.value); e.target.value=""; }} style={{ marginTop:4, fontSize:12 }}>
+            <option value="">+ Add menu item to combo...</option>
+            {data.menu.map(m=><option key={m.id} value={m.id}>{m.name} — {inr(m.price)}</option>)}
+          </select>
+          {form.items?.length>0&&(()=>{const orig=origPrice(form.items);const bp=+form.bundlePrice||0;return(
+            <div style={{marginTop:10,background:C.surface,borderRadius:8,padding:"8px 12px",fontSize:12}}>
+              <div style={{color:C.muted}}>Original total: <strong>{inr(orig)}</strong></div>
+              {bp>0&&<div style={{color:bp<orig?C.green:C.red}}>Bundle price: <strong>{inr(bp)}</strong> {bp<orig?`(save ${inr(orig-bp)})`:"(no discount)"}</div>}
+            </div>
+          );})()}
+          <Divider />
+          <div style={{ display:"flex", gap:8 }}>
+            <Btn full onClick={save}>{modal==="add"?"Create Combo":"Save Changes"}</Btn>
+            {modal==="edit"&&perms.canDelete&&<Btn variant="danger" onClick={()=>del(form.id)}>🗑 Delete</Btn>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ── QR CODE TABLE ORDERING ────────────────────────────────────
+function QRTableOrdering({ data, setData }) {
+  useTheme();
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [showGuestView, setShowGuestView] = useState(false);
+
+  // Generate a simple QR code as SVG using QR code URL service (no library needed)
+  const getQRUrl = (tableId) => {
+    const tableNum = data.tables.find(t=>t.id===tableId)?.number || "?";
+    // We encode a URL that would represent the guest ordering page
+    const orderUrl = `${window.location.origin}${window.location.pathname}?table=${tableId}&guest=1`;
+    return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(orderUrl)}`;
+  };
+
+  return (
+    <div className="fade-in">
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:14, flexWrap:"wrap", gap:10 }}>
+        <div>
+          <div className="playfair" style={{ fontSize:22, marginBottom:2 }}>📱 QR Code Table Ordering</div>
+          <div style={{ color:C.muted, fontSize:12 }}>Guests scan QR codes at their table to browse the menu and place orders directly.</div>
+        </div>
+      </div>
+
+      <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:"12px 16px", marginBottom:16, fontSize:12, color:C.muted, lineHeight:1.7 }}>
+        💡 Each table gets a unique QR code. When scanned, guests see your menu and can place orders directly to the kitchen — no waiter needed. Orders appear in your Orders tab as <strong style={{color:C.cream}}>"QR Order"</strong> status.
+      </div>
+
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:12 }}>
+        {data.tables.map(table => (
+          <Card key={table.id} style={{ textAlign:"center", cursor:"pointer" }} onClick={()=>setSelectedTable(table)}>
+            <div style={{ fontSize:22, marginBottom:6 }}>🪑</div>
+            <div style={{ fontWeight:700, fontSize:16, marginBottom:2 }}>Table {table.number}</div>
+            <div style={{ fontSize:11, color:C.muted, marginBottom:10 }}>{table.floor} · {table.capacity} seats</div>
+            <div style={{ background:C.accent+"18", border:`1px solid ${C.accent}33`, borderRadius:8, padding:"5px 10px", fontSize:11, color:C.accent, fontWeight:600 }}>
+              📱 View QR Code
+            </div>
+          </Card>
+        ))}
+      </div>
+
+      {selectedTable && (
+        <Modal title={`QR Code — Table ${selectedTable.number}`} onClose={()=>setSelectedTable(null)}>
+          <div style={{ textAlign:"center" }}>
+            <div style={{ fontSize:13, color:C.muted, marginBottom:14 }}>
+              Place this at Table {selectedTable.number}. Guests scan to order.
+            </div>
+            <div style={{ background:"#fff", borderRadius:12, padding:16, display:"inline-block", marginBottom:14 }}>
+              <img
+                src={getQRUrl(selectedTable.id)}
+                alt={`QR Code for Table ${selectedTable.number}`}
+                style={{ width:200, height:200, display:"block" }}
+                onError={e=>{ e.target.style.display="none"; e.target.nextSibling.style.display="block"; }}
+              />
+              <div style={{ display:"none", width:200, height:200, background:"#f0f0f0", borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, color:"#666" }}>
+                Connect to internet<br/>to load QR code
+              </div>
+            </div>
+            <div style={{ fontSize:12, color:C.muted, marginBottom:14 }}>
+              {data.restaurant.name} · Table {selectedTable.number}
+            </div>
+            <div style={{ display:"flex", gap:8, justifyContent:"center" }}>
+              <button onClick={()=>{
+                const w = window.open("","_blank","width=400,height=500");
+                w.document.write(`<!DOCTYPE html><html><head><title>Table ${selectedTable.number} QR</title><style>body{font-family:sans-serif;text-align:center;padding:30px;background:#fff}h2{margin:0 0 6px}p{color:#666;font-size:13px;margin:0 0 20px}.toolbar{position:fixed;top:0;left:0;right:0;background:#1a1a1a;padding:10px;display:flex;gap:8px;justify-content:center}.toolbar button{background:#f5a623;color:#000;border:none;border-radius:5px;padding:6px 16px;font-size:12px;font-weight:700;cursor:pointer}</style></head><body><div class="toolbar"><button onclick="window.print()">🖨️ Print</button><button onclick="window.close()">✕</button></div><div style="margin-top:60px"><h2>${data.restaurant.name}</h2><p>Table ${selectedTable.number} — Scan to order</p><img src="${getQRUrl(selectedTable.id)}" width="220" height="220"/><p style="margin-top:16px;font-size:12px;color:#999">Scan with your phone camera</p></div></body></html>`);
+                w.document.close();
+              }} style={{ background:C.accent+"22", color:C.accent, border:`1px solid ${C.accent}44`, borderRadius:8, padding:"8px 18px", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                🖨️ Print QR
+              </button>
+              <button onClick={()=>setShowGuestView(true)} style={{ background:C.surface, color:C.cream, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 18px", fontSize:13, fontWeight:600, cursor:"pointer" }}>
+                👁️ Preview Guest View
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showGuestView && selectedTable && (
+        <GuestOrderView table={selectedTable} data={data} setData={setData} onClose={()=>setShowGuestView(false)} />
+      )}
+    </div>
+  );
+}
+
+// ── GUEST ORDER VIEW (what customer sees after scanning QR) ────
+function GuestOrderView({ table, data, setData, onClose }) {
+  useTheme();
+  const [items, setItems] = useState([]);
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [placed, setPlaced] = useState(false);
+  const [step, setStep] = useState("menu"); // menu | review | done
+
+  const cats = ["All", ...new Set(data.menu.filter(m=>m.available).map(m=>m.category))];
+  const [cat, setCat] = useState("All");
+  const visible = data.menu.filter(m => m.available && (cat==="All" || m.category===cat));
+
+  const add = m => setItems(prev => {
+    const ex = prev.find(i=>i.menuId===m.id);
+    if (ex) return prev.map(i=>i.menuId===m.id?{...i,qty:i.qty+1}:i);
+    return [...prev, {menuId:m.id, name:m.name, qty:1, price:m.price}];
+  });
+  const chQty = (menuId, d) => setItems(prev => prev.map(i=>i.menuId===menuId?{...i,qty:Math.max(0,i.qty+d)}:i).filter(i=>i.qty>0));
+  const subtotal = items.reduce((s,i)=>s+i.qty*i.price,0);
+  const tax = Math.round(subtotal*0.18);
+  const total = subtotal+tax;
+  const est = items.length>0 ? getOrderEstimate({items}, data.menu) : 0;
+
+  const placeOrder = () => {
+    setData(d => ({
+      ...d,
+      orders: [...d.orders, { id:mkId(), tableId:table.id, items, customerName:name||"QR Guest", note:"[QR Order] "+note, tax, total, discount:0, createdAt:now(), status:"pending", isQROrder:true }],
+      tables: d.tables.map(t=>t.id===table.id?{...t,status:"occupied",occupiedAt:t.occupiedAt||Date.now()}:t),
+    }));
+    emitNotif({type:"order",title:"New QR Order!",body:`Table ${table.number} · ${items.length} items · ${inr(total)}`});
+    setStep("done");
+  };
+
+  const r = data.restaurant;
+  const bg = "#0f0e0d", surface="#1a1815", card="#231f1b", accent="#f5a623", cream="#f0e6d3", muted="#8a7d6b", border="#2e2820";
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:2000,background:bg,display:"flex",flexDirection:"column",fontFamily:"'DM Sans',sans-serif",color:cream}}>
+      {/* Header */}
+      <div style={{background:surface,borderBottom:`1px solid ${border}`,padding:"14px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:18,fontWeight:700,color:accent}}>{r.name}</div>
+          <div style={{fontSize:12,color:muted,marginTop:1}}>📍 Table {table.number}</div>
+        </div>
+        <button onClick={onClose} style={{background:border,color:muted,border:"none",borderRadius:7,padding:"5px 11px",fontSize:12,cursor:"pointer"}}>✕ Close Preview</button>
+      </div>
+
+      {step==="done"&&(
+        <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:32,textAlign:"center"}}>
+          <div style={{fontSize:64,marginBottom:16}}>✅</div>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:26,fontWeight:700,color:accent,marginBottom:8}}>Order Placed!</div>
+          <div style={{fontSize:14,color:muted,marginBottom:6}}>Your order is being prepared.</div>
+          <div style={{background:"#f5a62318",border:"1px solid #f5a62344",borderRadius:10,padding:"10px 20px",fontSize:13,color:accent,marginBottom:24}}>
+            ⏱ Estimated wait: <strong>{est} minutes</strong>
+          </div>
+          <div style={{fontSize:12,color:muted}}>Thank you for dining with us 🙏</div>
+          <button onClick={()=>{setStep("menu");setItems([]);setName("");setNote("");}} style={{marginTop:24,background:accent,color:"#0f0e0d",border:"none",borderRadius:10,padding:"12px 28px",fontWeight:700,fontSize:14,cursor:"pointer"}}>Order Again</button>
+        </div>
+      )}
+
+      {step==="review"&&(
+        <div style={{flex:1,overflowY:"auto",padding:18}}>
+          <div style={{fontFamily:"'Playfair Display',serif",fontSize:20,marginBottom:4}}>Review & Confirm</div>
+          <div style={{fontSize:13,color:muted,marginBottom:16}}>Table {table.number}</div>
+          <div style={{background:card,border:`1px solid ${border}`,borderRadius:12,padding:14,marginBottom:14}}>
+            {items.map((item,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${border}22`}}>
+                <div><div style={{fontSize:13,fontWeight:600}}>{item.name}</div><div style={{fontSize:11,color:muted}}>×{item.qty}</div></div>
+                <div style={{color:accent,fontWeight:700}}>{inr(item.qty*item.price)}</div>
+              </div>
+            ))}
+            <div style={{paddingTop:10,display:"flex",justifyContent:"space-between",color:muted,fontSize:12,marginBottom:4}}><span>GST (18%)</span><span>{inr(tax)}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",fontWeight:700,color:accent,fontSize:17,borderTop:`1px solid ${border}`,paddingTop:8}}><span>Total</span><span>{inr(total)}</span></div>
+          </div>
+          <div style={{background:"#f5a62318",border:"1px solid #f5a62344",borderRadius:10,padding:"10px 14px",fontSize:13,color:accent,marginBottom:14}}>
+            ⏱ Est. wait: <strong>{est} min</strong>
+          </div>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:11,color:muted,fontWeight:600,marginBottom:5}}>YOUR NAME (OPTIONAL)</div>
+            <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Rahul" style={{background:card,border:`1px solid ${border}`,color:cream,borderRadius:8,padding:"9px 13px",outline:"none",width:"100%",fontSize:13}} />
+          </div>
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,color:muted,fontWeight:600,marginBottom:5}}>SPECIAL REQUESTS</div>
+            <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="No onions, less spicy..." rows={2} style={{background:card,border:`1px solid ${border}`,color:cream,borderRadius:8,padding:"9px 13px",outline:"none",width:"100%",fontSize:13,resize:"none"}} />
+          </div>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={()=>setStep("menu")} style={{flex:1,padding:"13px",borderRadius:11,border:`1px solid ${border}`,background:"transparent",color:muted,cursor:"pointer",fontSize:14,fontWeight:600}}>← Back</button>
+            <button onClick={placeOrder} style={{flex:2,padding:"13px",borderRadius:11,border:"none",background:accent,color:"#0f0e0d",cursor:"pointer",fontSize:14,fontWeight:700}}>✅ Place Order</button>
+          </div>
+        </div>
+      )}
+
+      {step==="menu"&&<>
+        {/* Category pills */}
+        <div style={{display:"flex",gap:6,padding:"10px 14px",overflowX:"auto",borderBottom:`1px solid ${border}`,flexShrink:0}}>
+          {cats.map(c=><button key={c} onClick={()=>setCat(c)} style={{padding:"5px 14px",borderRadius:20,fontSize:12,fontWeight:600,border:"none",cursor:"pointer",whiteSpace:"nowrap",background:cat===c?accent:surface,color:cat===c?"#0f0e0d":muted}}>{c}</button>)}
+        </div>
+        {/* Menu */}
+        <div style={{flex:1,overflowY:"auto",padding:"14px",display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,alignContent:"start",paddingBottom:100}}>
+          {visible.map(m=>{
+            const inCart=items.find(i=>i.menuId===m.id);
+            return(
+              <button key={m.id} onClick={()=>add(m)} style={{background:inCart?accent+"22":card,border:`2px solid ${inCart?accent:border}`,borderRadius:12,padding:"14px 10px",cursor:"pointer",textAlign:"left",position:"relative"}}>
+                {inCart&&<div style={{position:"absolute",top:-8,right:-8,background:accent,color:"#0f0e0d",borderRadius:"50%",width:22,height:22,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700}}>{inCart.qty}</div>}
+                <div style={{fontSize:m.isVeg?"11px":"11px",marginBottom:3}}>{m.isVeg?"🟢":"🔴"}</div>
+                <div style={{fontSize:13,fontWeight:600,marginBottom:4,lineHeight:1.3,color:cream}}>{m.name}</div>
+                <div style={{color:accent,fontWeight:700,fontSize:14}}>{inr(m.price)}</div>
+              </button>
+            );
+          })}
+        </div>
+        {/* Bottom cart bar */}
+        {items.length>0&&(
+          <div style={{position:"sticky",bottom:0,background:surface,borderTop:`1px solid ${border}`,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontWeight:700,color:cream}}>{items.reduce((s,i)=>s+i.qty,0)} items</div>
+              <div style={{fontSize:13,color:accent,fontWeight:700}}>{inr(subtotal)}</div>
+            </div>
+            <button onClick={()=>setStep("review")} style={{background:accent,color:"#0f0e0d",border:"none",borderRadius:10,padding:"11px 24px",fontWeight:700,fontSize:14,cursor:"pointer"}}>
+              Review Order →
+            </button>
+          </div>
+        )}
+      </>}
+    </div>
+  );
 }
 
 // ── RESERVATIONS ──────────────────────────────────────────────
@@ -8287,6 +8796,8 @@ const ALL_TABS=[
   {id:"orders",label:"Orders",icon:"🍽️"},
   {id:"orderboard",label:"Order Board",icon:"📡"},
   {id:"menu",label:"Menu",icon:"📋"},
+  {id:"combos",label:"Combos",icon:"🍱"},
+  {id:"qrordering",label:"QR Ordering",icon:"📱"},
   {id:"reservations",label:"Bookings",icon:"📅"},
   {id:"staff",label:"Staff",icon:"👨‍🍳"},
   {id:"customers",label:"Customers",icon:"👥"},
@@ -8467,6 +8978,8 @@ export default function App(){
           {tab==="orders"&&<Orders {...tp}/>}
           {tab==="orderboard"&&<LiveOrderBoard {...tp}/>}
           {tab==="menu"&&<Menu {...tp}/>}
+          {tab==="combos"&&<ComboManager data={data} setData={setData} perms={perms}/>}
+          {tab==="qrordering"&&<QRTableOrdering data={data} setData={setData}/>}
           {tab==="reservations"&&<Reservations {...tp} perms={perms}/>}
           {tab==="staff"&&<Staff {...tp}/>}
           {tab==="customers"&&<Customers {...tp}/>}
@@ -8538,6 +9051,8 @@ export default function App(){
             {tab==="orders"&&<Orders {...tp}/>}
             {tab==="orderboard"&&<LiveOrderBoard {...tp}/>}
             {tab==="menu"&&<Menu {...tp}/>}
+            {tab==="combos"&&<ComboManager data={data} setData={setData} perms={perms}/>}
+            {tab==="qrordering"&&<QRTableOrdering data={data} setData={setData}/>}
             {tab==="reservations"&&<Reservations {...tp} perms={perms}/>}
             {tab==="staff"&&<Staff {...tp}/>}
             {tab==="customers"&&<Customers {...tp}/>}
