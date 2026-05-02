@@ -97,6 +97,30 @@ const THEMES = {
 const _customThemeRaw=(()=>{try{return JSON.parse(localStorage.getItem("rcm_custom_theme")||"null");}catch{return null;}})();
 if(_customThemeRaw&&_customThemeRaw.bg){THEMES.custom={..._customThemeRaw,id:"custom",label:_customThemeRaw.label||"Custom",emoji:"🎨"};}
 
+
+// ── MULTI-BRANCH SYSTEM ───────────────────────────────────
+// Each branch stores its own data under rcm_branch_{id}_data
+const BRANCH_KEY = "rcm_branches";
+const ACTIVE_BRANCH_KEY = "rcm_active_branch";
+function getBranches(){try{return JSON.parse(localStorage.getItem(BRANCH_KEY)||"null")||[{id:"main",name:"Main Branch",address:"",isDefault:true}];}catch{return [{id:"main",name:"Main Branch",address:"",isDefault:true}];}}
+function saveBranches(bs){try{localStorage.setItem(BRANCH_KEY,JSON.stringify(bs));}catch{}}
+function getActiveBranchId(){try{return localStorage.getItem(ACTIVE_BRANCH_KEY)||"main";}catch{return "main";}}
+function setActiveBranchId(id){try{localStorage.setItem(ACTIVE_BRANCH_KEY,id);}catch{}}
+function getBranchDataKey(branchId){return `rcm_branch_${branchId}_data`;}
+
+let _branchListeners=[];
+const _branchStore={id:getActiveBranchId()};
+function switchBranch(id){_branchStore.id=id;setActiveBranchId(id);_branchListeners.forEach(fn=>fn(id));}
+function useBranch(){
+  const [bid,setBid]=useState(_branchStore.id);
+  useEffect(()=>{
+    const fn=id=>setBid(id);
+    _branchListeners.push(fn);
+    return()=>{_branchListeners=_branchListeners.filter(x=>x!==fn);};
+  },[]);
+  return bid;
+}
+
 // Active theme — initialized immediately from localStorage so C is never undefined
 const _savedThemeId = (()=>{try{return localStorage.getItem("rcm_theme")||"amber";}catch{return "amber";}})();
 const _themeStore = { current: THEMES[_savedThemeId] || THEMES.amber };
@@ -419,6 +443,84 @@ function watchReservations(reservations,alertMinutes=30){
   });
 }
 
+
+// ── BRANCH SWITCHER COMPONENT ─────────────────────────────
+function BranchSwitcher(){
+  useTheme();
+  const activeBranchId=useBranch();
+  const [branches,setBranches]=useState(getBranches);
+  const [open,setOpen]=useState(false);
+  const activeBranch=branches.find(b=>b.id===activeBranchId)||branches[0]||{name:"Branch"};
+
+  const doSwitch=(id)=>{
+    switchBranch(id);
+    setOpen(false);
+    // Reload page so data/useStore re-initializes cleanly
+    setTimeout(()=>window.location.reload(),100);
+  };
+
+  useEffect(()=>{
+    if(open){const fn=e=>{if(!e.target.closest(".branch-panel"))setOpen(false);};setTimeout(()=>document.addEventListener("click",fn),0);return()=>document.removeEventListener("click",fn);}
+  },[open]);
+
+  return(
+    <div style={{position:"relative"}} className="branch-panel">
+      <button onClick={()=>setOpen(s=>!s)} style={{
+        background:open?C.accent+"22":"transparent",
+        border:`1px solid ${open?C.accent+"55":C.border}`,
+        borderRadius:8,padding:"5px 10px",
+        color:open?C.accent:C.muted,
+        fontSize:12,fontWeight:600,
+        display:"flex",alignItems:"center",gap:5,
+        cursor:"pointer",whiteSpace:"nowrap",
+      }}>
+        🏪 {activeBranch.name} <span style={{fontSize:9,opacity:.6}}>▾</span>
+      </button>
+      {open&&(
+        <div className="fade-in" style={{
+          position:"absolute",right:0,top:"calc(100% + 6px)",
+          minWidth:220,background:C.card,border:`1px solid ${C.border}`,
+          borderRadius:12,boxShadow:"0 8px 32px #0008",zIndex:999,overflow:"hidden",
+        }}>
+          <div style={{padding:"8px 14px 6px",borderBottom:`1px solid ${C.border}`,fontSize:10,color:C.muted,fontWeight:700,letterSpacing:.5}}>SWITCH BRANCH</div>
+          {branches.map(b=>(
+            <button key={b.id} onClick={()=>doSwitch(b.id)} style={{
+              width:"100%",padding:"10px 14px",background:b.id===activeBranchId?C.accent+"18":"none",
+              color:b.id===activeBranchId?C.accent:C.cream,
+              textAlign:"left",border:"none",cursor:"pointer",fontSize:13,fontWeight:b.id===activeBranchId?700:400,
+              display:"flex",alignItems:"center",gap:8,
+            }}
+              onMouseEnter={e=>e.currentTarget.style.background=b.id===activeBranchId?C.accent+"22":C.border}
+              onMouseLeave={e=>e.currentTarget.style.background=b.id===activeBranchId?C.accent+"18":"none"}
+            >
+              <span style={{fontSize:16}}>{b.id===activeBranchId?"✅":"🏪"}</span>
+              <div>
+                <div>{b.name}</div>
+                {b.address&&<div style={{fontSize:10,color:C.muted,fontWeight:400}}>{b.address}</div>}
+              </div>
+            </button>
+          ))}
+          <div style={{borderTop:`1px solid ${C.border}`,padding:"6px 8px"}}>
+            <button onClick={()=>{
+              const name=prompt("New branch name:");
+              if(!name?.trim())return;
+              const addr=prompt("Branch address (optional):")||"";
+              const nb={id:mkId(),name:name.trim(),address:addr,isDefault:false};
+              const updated=[...branches,nb];
+              setBranches(updated);
+              saveBranches(updated);
+              doSwitch(nb.id);
+            }} style={{
+              width:"100%",padding:"8px 14px",background:"none",color:C.accent,
+              border:"none",cursor:"pointer",fontSize:12,fontWeight:600,textAlign:"left",
+            }}>+ Add New Branch</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── IN-APP NOTIFICATION BELL ──────────────────────────────────
 function NotifBell({role}){
   useTheme();
@@ -633,6 +735,141 @@ function buildDeliveryLines(delivery, restaurant, printerCfg) {
     delivery.assignedTo && { text: twoCol('Rider:', delivery.assignedTo, W) },
     { type:'cut' },
   ].filter(Boolean);
+}
+
+
+// ── Takeaway label builder (ESC/POS) ──
+function buildTakeawayLabel(order, data, printerCfg) {
+  const W = pw(printerCfg);
+  const r = data.restaurant;
+  const tbl = data.tables?.find(t => t.id === order.tableId);
+  const dt = new Date(order.createdAt || Date.now());
+  const subtotal = order.items.reduce((s, i) => s + i.qty * i.price, 0);
+  const total = order.total ?? subtotal;
+  return [
+    { type:'feed', n:1 },
+    { text: r.name, align:'c', bold:true, double:true },
+    { type:'divider', width:W },
+    { text: 'TAKEAWAY', align:'c', bold:true },
+    { type:'divider', width:W },
+    { text: twoCol('Order:', '#'+order.id.toUpperCase().slice(-6), W), bold:true },
+    order.customerName && { text: twoCol('Name:', order.customerName, W), bold:true },
+    { text: twoCol('Time:', dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'}), W) },
+    tbl && { text: twoCol('Table:', 'T'+tbl.number, W) },
+    { type:'divider', width:W },
+    ...order.items.map(i => ({
+      text: padR(i.name, W-8) + padL('x'+i.qty, 4) + padL('', 4),
+      bold: true
+    })),
+    { type:'divider', width:W },
+    { text: twoCol('TOTAL:', 'Rs.'+total.toLocaleString('en-IN'), W), bold:true },
+    order.note && { type:'feed', n:1 },
+    order.note && { text: 'NOTE: '+order.note, bold:true },
+    { type:'feed', n:2 },
+    { text: r.phone||'', align:'c', small:true },
+    { type:'cut' },
+  ].filter(Boolean);
+}
+
+// Browser-print takeaway label (HTML popup)
+function browserPrintTakeawayLabel(order, data) {
+  const r = data.restaurant;
+  const dt = new Date(order.createdAt || Date.now());
+  const total = order.total ?? order.items.reduce((s,i)=>s+i.qty*i.price,0);
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Takeaway Label</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Courier New',monospace;background:#fff;color:#000;padding:8px;width:80mm}
+  .toolbar{position:fixed;top:0;left:0;right:0;background:#1a1a1a;color:#fff;padding:6px 10px;display:flex;gap:8px;align-items:center;z-index:9;font-size:12px}
+  .toolbar button{background:#f5a623;color:#000;border:none;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:700;cursor:pointer}
+  .close-btn{background:#555!important;color:#fff!important;margin-left:auto}
+  .content{margin-top:40px}
+  .center{text-align:center}
+  .name{font-size:18px;font-weight:700;text-transform:uppercase}
+  .label{font-size:24px;font-weight:900;letter-spacing:2px;border:3px solid #000;padding:4px 14px;display:inline-block;margin:6px 0}
+  .item{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed #ccc;font-size:13px;font-weight:600}
+  .total{display:flex;justify-content:space-between;font-size:16px;font-weight:900;padding:6px 0;border-top:2px solid #000;margin-top:4px}
+  .note{background:#fffbe6;border:1px solid #f5a623;border-radius:4px;padding:5px 8px;margin-top:6px;font-size:13px;font-weight:700}
+  .meta{font-size:11px;color:#555;margin:2px 0}
+  hr{border:1px dashed #000;margin:6px 0}
+  @media print{.toolbar{display:none}.content{margin-top:0}}
+</style></head><body>
+<div class="toolbar">
+  <span>🏷️ Takeaway Label</span>
+  <button onclick="window.print()">🖨️ Print</button>
+  <button class="close-btn" onclick="window.close()">✕</button>
+</div>
+<div class="content">
+  <div class="center">
+    <div class="name">${r.name}</div>
+    <div class="label">TAKEAWAY</div>
+    <div class="meta">#${order.id.toUpperCase().slice(-6)} · ${dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>
+    ${order.customerName ? `<div class="meta" style="font-size:14px;font-weight:700">👤 ${order.customerName}</div>` : ''}
+  </div>
+  <hr>
+  <div>
+    ${order.items.map(i=>`<div class="item"><span>${i.name}</span><span>x${i.qty}</span></div>`).join('')}
+  </div>
+  <div class="total"><span>TOTAL</span><span>₹${total.toLocaleString('en-IN')}</span></div>
+  ${order.note ? `<div class="note">📝 ${order.note}</div>` : ''}
+  <hr>
+  <div class="center" style="font-size:10px;color:#888;margin-top:4px">${r.phone||''} · ${r.address||''}</div>
+</div>
+</body></html>`;
+  const w = window.open('','_blank','width=360,height=500,noopener');
+  if(w){w.document.open();w.document.write(html);w.document.close();}
+  else alert('Allow pop-ups to print label.');
+}
+
+// Label preview modal (no printer needed)
+function TakeawayLabelPreview({order, data, onClose}){
+  useTheme();
+  const r = data.restaurant;
+  const dt = new Date(order.createdAt||Date.now());
+  const total = order.total ?? order.items.reduce((s,i)=>s+i.qty*i.price,0);
+  return(
+    <Modal title="🏷️ Takeaway Label Preview" onClose={onClose}>
+      <div style={{background:"#fff",color:"#000",fontFamily:"'Courier New',monospace",padding:16,borderRadius:8,maxWidth:280,margin:"0 auto",border:"2px dashed #ccc"}}>
+        <div style={{textAlign:"center",marginBottom:8}}>
+          <div style={{fontSize:14,fontWeight:900,textTransform:"uppercase"}}>{r.name}</div>
+          <div style={{fontSize:20,fontWeight:900,letterSpacing:2,border:"2px solid #000",padding:"2px 10px",display:"inline-block",margin:"4px 0"}}>TAKEAWAY</div>
+          <div style={{fontSize:11,color:"#666"}}>#{order.id.toUpperCase().slice(-6)} · {dt.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</div>
+          {order.customerName&&<div style={{fontSize:13,fontWeight:700}}>👤 {order.customerName}</div>}
+        </div>
+        <hr style={{borderTop:"1px dashed #000",margin:"6px 0"}}/>
+        {order.items.map((i,idx)=>(
+          <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:12,fontWeight:600,padding:"2px 0",borderBottom:"1px dashed #eee"}}>
+            <span>{i.name}</span><span>x{i.qty}</span>
+          </div>
+        ))}
+        <div style={{display:"flex",justifyContent:"space-between",fontSize:14,fontWeight:900,padding:"5px 0",borderTop:"2px solid #000",marginTop:4}}>
+          <span>TOTAL</span><span>₹{total.toLocaleString('en-IN')}</span>
+        </div>
+        {order.note&&<div style={{background:"#fffbe6",border:"1px solid #f5a623",borderRadius:4,padding:"4px 8px",fontSize:12,fontWeight:700,marginTop:4}}>📝 {order.note}</div>}
+        <div style={{textAlign:"center",fontSize:9,color:"#aaa",marginTop:6}}>{r.phone||''}</div>
+      </div>
+      <div style={{display:"flex",gap:8,marginTop:14}}>
+        <Btn full onClick={()=>browserPrintTakeawayLabel(order,data)}>🖨️ Print Label</Btn>
+        <Btn variant="ghost" onClick={onClose}>Close</Btn>
+      </div>
+    </Modal>
+  );
+}
+
+// Master print function — checks settings to decide mode
+async function printTakeawayLabel(order, data) {
+  let cfg=null;try{cfg=JSON.parse(localStorage.getItem("rcm_printer")||"null");}catch{}
+  const labelMode=localStorage.getItem("rcm_label_mode")||"browser";
+  if(labelMode==="thermal"&&cfg){
+    try{
+      const lines=buildTakeawayLabel(order,data,cfg);
+      const bytes=buildEscPos(lines);
+      await sendToThermal(bytes,cfg);
+      return;
+    }catch(e){alert("Thermal print failed: "+e.message);return;}
+  }
+  // browser or preview modes both open the window
+  browserPrintTakeawayLabel(order,data);
 }
 
 // ── Printer connection manager ──
@@ -2885,6 +3122,64 @@ function TableTimer({occupiedAt}){
   return <div style={{fontSize:10,color,fontWeight:700,marginTop:3}}>⏱ {label}</div>;
 }
 
+// -- RESERVATION COUNTDOWN TIMER --
+function ReservationCountdown({table, reservations, setData}){
+  const [now,setNow]=useState(Date.now());
+  const [fired,setFired]=useState(false);
+  useEffect(()=>{const id=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(id);},[]);
+
+  if(table.status!=="reserved")return null;
+  const res=(reservations||[]).find(r=>r.tableId===table.id&&r.status==="confirmed");
+  if(!res)return null;
+
+  const resTime=new Date(`${res.date}T${res.time||"00:00"}`).getTime();
+  const msLeft=resTime-now;
+  const secsLeft=Math.ceil(msLeft/1000);
+  const isOverdue=secsLeft<=0;
+
+  useEffect(()=>{
+    if(isOverdue&&!fired){
+      setFired(true);
+      try{
+        const ctx=new(window.AudioContext||window.webkitAudioContext)();
+        [0,150,300].forEach(delay=>{
+          const osc=ctx.createOscillator();
+          const gain=ctx.createGain();
+          osc.connect(gain);gain.connect(ctx.destination);
+          osc.frequency.value=880;osc.type="square";
+          gain.gain.setValueAtTime(0.3,ctx.currentTime+delay/1000);
+          gain.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+delay/1000+0.15);
+          osc.start(ctx.currentTime+delay/1000);
+          osc.stop(ctx.currentTime+delay/1000+0.2);
+        });
+      }catch{}
+      setData(d=>({...d,
+        tables:d.tables.map(t=>t.id===table.id?{...t,status:"occupied",occupiedAt:Date.now()}:t),
+        reservations:(d.reservations||[]).map(r=>r.id===res.id?{...r,status:"completed"}:r)
+      }));
+    }
+  // eslint-disable-next-line
+  },[isOverdue]);
+
+  if(isOverdue)return null;
+
+  const h=Math.floor(secsLeft/3600);
+  const m=Math.floor((secsLeft%3600)/60);
+  const s=secsLeft%60;
+  const label=h>0?`${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`:`${m}:${String(s).padStart(2,"0")}`;
+  const isUrgent=secsLeft<=300;
+  const isWarning=secsLeft<=1800;
+  const color=isUrgent?C.red:isWarning?C.orange:C.accent;
+
+  return(
+    <div style={{fontSize:11,color,fontWeight:700,marginTop:4,display:"flex",alignItems:"center",gap:4,
+      animation:isUrgent?"pulse 1s infinite":"none"}}>
+      📅 {label}
+      <span style={{fontSize:9,color:C.muted,fontWeight:400}}>{res.name}</span>
+    </div>
+  );
+}
+
 function Tables({data,setData,perms,sess}){
   useTheme();
   const [modal,setModal]=useState(null);
@@ -3083,6 +3378,7 @@ function Tables({data,setData,perms,sess}){
                   {t.note&&<div style={{color:C.muted,fontSize:10,textAlign:"center",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:4}}>{t.note}</div>}
                   {order&&<div style={{fontSize:10,color:C.accent,textAlign:"center",fontWeight:600}}>🍽 {order.status} · {order.items?.length||0} items</div>}
                   <TableTimer occupiedAt={t.occupiedAt} />
+                  <ReservationCountdown table={t} reservations={data.reservations} setData={setData} />
                   {/* Mini stats */}
                   {stats.orders>0&&<div style={{marginTop:6,paddingTop:6,borderTop:`1px solid ${C.border}`,display:"flex",justifyContent:"space-between",fontSize:10}}>
                     <span style={{color:C.muted}}>{stats.orders} orders</span>
@@ -4478,6 +4774,7 @@ function Orders({data,setData,perms,sess,activeWaiter}){
             </select>
             <div style={{display:"flex",gap:4,marginTop:4,flexWrap:"wrap"}}>
               <InvoiceMenu order={o} data={data} />
+              <Btn size="sm" variant="ghost" onClick={()=>printTakeawayLabel(o,data)}>🏷️ Label</Btn>
               <Btn size="sm" variant="ghost" onClick={()=>printerStore.cfg ? thermalPrintKitchen(o,data) : printKitchenTicket(o,data)}>🍳 Kitchen</Btn>
               <Btn size="sm" variant="ghost" onClick={()=>setSplitOrder(o)}>💳 Split</Btn>
               <Btn size="sm" variant="ghost" onClick={()=>{setForm({...o,discount:o.discount||0,note:o.note||""});setModal("edit");}}>✏️ Edit</Btn>
@@ -6773,6 +7070,7 @@ function Deliveries({ data, setData, perms }) {
                 <div style={{ color: C.accent, fontWeight: 700, fontSize: 16, marginBottom: 6 }}>{inr(d.total)}</div>
                 <div style={{ marginBottom: 6 }}>
                   <DeliveryInvoiceMenu delivery={d} restaurant={data.restaurant} />
+                  <Btn size="sm" variant="ghost" onClick={()=>browserPrintTakeawayLabel({...d,items:d.items,id:d.id,customerName:d.customerName,note:d.note,total:d.total,createdAt:d.createdAt,tableId:null},data)}>🏷️ Label</Btn>
                 </div>
                 {/* Status flow stepper */}
                 <div style={{ display: "flex", gap: 2, marginBottom: 8, flexWrap: "wrap" }}>
@@ -8016,6 +8314,105 @@ function UserAccountModal({modal,form,setForm,sf,onSave,onDelete,sess,pwStrength
   </Modal>;
 }
 
+
+// ── BRANCH SETTINGS PANEL ────────────────────────────────
+function BranchSettingsPanel(){
+  useTheme();
+  const activeBranchId=useBranch();
+  const [localBranches,setLocalBranches]=useState(getBranches);
+  const save=(bs)=>{setLocalBranches(bs);saveBranches(bs);};
+  return(
+    <div className="fade-in">
+      <Card style={{marginBottom:12}}>
+        <div style={{fontWeight:600,fontSize:13,marginBottom:12}}>🏪 Branch Management</div>
+        <div style={{color:C.muted,fontSize:12,marginBottom:14,lineHeight:1.6}}>
+          Each branch has its own independent data (menu, tables, orders, staff, etc).
+          Use the <strong style={{color:C.accent}}>🏪 branch switcher</strong> in the top bar to switch locations.
+          Data is stored locally per branch — ready to connect to Firebase.
+        </div>
+        {localBranches.map((b,i)=>(
+          <div key={b.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:b.id===activeBranchId?C.accent+"15":C.surface,border:`1px solid ${b.id===activeBranchId?C.accent+"55":C.border}`,borderRadius:8,marginBottom:8}}>
+            <span style={{fontSize:18}}>{b.id===activeBranchId?"✅":"🏪"}</span>
+            <div style={{flex:1,minWidth:0}}>
+              <input value={b.name} onChange={e=>{const bs=[...localBranches];bs[i]={...bs[i],name:e.target.value};save(bs);}} style={{fontWeight:600,fontSize:13,background:"transparent",border:"none",padding:0,color:C.cream,width:"100%"}} />
+              <input value={b.address||""} onChange={e=>{const bs=[...localBranches];bs[i]={...bs[i],address:e.target.value};save(bs);}} placeholder="Address (optional)" style={{fontSize:11,background:"transparent",border:"none",padding:0,color:C.muted,width:"100%",marginTop:2}} />
+            </div>
+            {b.id===activeBranchId&&<span style={{fontSize:10,background:C.accent+"22",color:C.accent,padding:"2px 8px",borderRadius:12,fontWeight:700,whiteSpace:"nowrap"}}>ACTIVE</span>}
+            {!b.isDefault&&b.id!==activeBranchId&&(
+              <button onClick={()=>{if(!window.confirm('Delete branch "'+b.name+'"? This cannot be undone.'))return;save(localBranches.filter((_,j)=>j!==i));}} style={{background:"none",color:C.red,fontSize:13,border:"none",cursor:"pointer",padding:"2px 6px"}}>🗑</button>
+            )}
+          </div>
+        ))}
+        <Btn variant="ghost" size="sm" onClick={()=>{
+          const name=prompt("New branch name:");
+          if(!name?.trim())return;
+          const addr=prompt("Branch address (optional):")||"";
+          const nb={id:mkId(),name:name.trim(),address:addr,isDefault:false};
+          save([...localBranches,nb]);
+        }}>+ Add Branch</Btn>
+      </Card>
+      <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",fontSize:12,color:C.muted,lineHeight:1.7}}>
+        <strong style={{color:C.cream}}>Note:</strong> Names and addresses auto-save as you type.
+        To switch branches, use the <strong style={{color:C.accent}}>🏪 branch name</strong> button in the top bar — the page reloads to load that branch's data.
+        Firebase sync can be wired up by replacing localStorage calls with Firestore in the branch helpers.
+      </div>
+    </div>
+  );
+}
+
+// ── LABEL PRINT SETTINGS PANEL ───────────────────────────
+function LabelPrintSettingsPanel({data}){
+  useTheme();
+  const [labelMode,setLabelMode]=useState(()=>localStorage.getItem("rcm_label_mode")||"browser");
+  const saveLabelMode=(m)=>{setLabelMode(m);localStorage.setItem("rcm_label_mode",m);};
+  const modes=[
+    {id:"browser",icon:"🖨️",label:"Browser Print",desc:"Opens a print-ready popup. Works on any device and any printer. Great for saving as PDF too."},
+    {id:"thermal",icon:"🔥",label:"Thermal Printer (ESC/POS)",desc:"Sends directly to your thermal printer via USB, Bluetooth, or Network. Configure the printer in the Printers tab first."},
+    {id:"preview",icon:"👁️",label:"Label Preview Only",desc:"Shows a on-screen preview card. Useful for checking layout or screenshotting. No printer needed."},
+  ];
+  return(
+    <div className="fade-in">
+      <Card style={{marginBottom:12}}>
+        <div style={{fontWeight:600,fontSize:13,marginBottom:4}}>🏷️ Takeaway Label Print Mode</div>
+        <div style={{color:C.muted,fontSize:12,marginBottom:14}}>
+          Choose how the <strong style={{color:C.cream}}>🏷️ Label</strong> button works on orders and deliveries.
+        </div>
+        {modes.map(m=>(
+          <div key={m.id} onClick={()=>saveLabelMode(m.id)} style={{
+            display:"flex",alignItems:"flex-start",gap:12,padding:"12px 14px",
+            background:labelMode===m.id?C.accent+"18":C.surface,
+            border:`1.5px solid ${labelMode===m.id?C.accent:C.border}`,
+            borderRadius:10,marginBottom:10,cursor:"pointer",transition:"all .15s",
+          }}>
+            <div style={{fontSize:22,marginTop:2,flexShrink:0}}>{m.icon}</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:600,fontSize:13,color:labelMode===m.id?C.accent:C.cream,marginBottom:3}}>{m.label}</div>
+              <div style={{fontSize:12,color:C.muted,lineHeight:1.5}}>{m.desc}</div>
+            </div>
+            <div style={{width:18,height:18,borderRadius:"50%",border:`2px solid ${labelMode===m.id?C.accent:C.border}`,background:labelMode===m.id?C.accent:"transparent",flexShrink:0,marginTop:2,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              {labelMode===m.id&&<div style={{width:7,height:7,borderRadius:"50%",background:"#fff"}} />}
+            </div>
+          </div>
+        ))}
+      </Card>
+      <Card style={{marginBottom:12}}>
+        <div style={{fontWeight:600,fontSize:13,marginBottom:8}}>📋 What's on the label</div>
+        <div style={{fontSize:12,color:C.muted,lineHeight:1.9}}>
+          Order number & time · Customer name · All items + quantities · Order total · Kitchen notes · Restaurant name & phone
+        </div>
+      </Card>
+      <Card>
+        <div style={{fontWeight:600,fontSize:13,marginBottom:4}}>🧪 Test Label</div>
+        <div style={{color:C.muted,fontSize:12,marginBottom:12}}>Print a sample to check your layout looks right.</div>
+        <Btn onClick={()=>{
+          const sampleOrder={id:"TEST001",customerName:"Test Customer",items:[{name:"Butter Chicken",qty:2,price:380},{name:"Garlic Naan",qty:3,price:60}],total:940,note:"Less spicy please",createdAt:new Date().toISOString(),tableId:null};
+          printTakeawayLabel(sampleOrder,data);
+        }}>🖨️ Print Test Label</Btn>
+      </Card>
+    </div>
+  );
+}
+
 // ── SETTINGS ──────────────────────────────────────────────────
 function Settings({data,setData,users,setUsers,activeThemeId,onThemeChange,sess,roleTabOverrides,setRoleTabOverrides}){
   useTheme();
@@ -8122,6 +8519,8 @@ function Settings({data,setData,users,setUsers,activeThemeId,onThemeChange,sess,
       {sTabPill("tabs","Tab Access","📑")}
       {sTabPill("stations","Stations & Tax","🏪")}
       {sTabPill("activity","Activity Log","📋")}
+      {sTabPill("branches","Branches","🏪")}
+      {sTabPill("labelprint","Label Print","🏷️")}
     </div>
 
     {/* ══ RESTAURANT INFO ══ */}
@@ -8738,6 +9137,11 @@ function Settings({data,setData,users,setUsers,activeThemeId,onThemeChange,sess,
       </div>
     </div>}
 
+
+    {sTab==="branches"&&<BranchSettingsPanel />}
+
+    {sTab==="labelprint"&&<LabelPrintSettingsPanel data={data} />}
+
     {/* ── Add/Edit/Reset Password Modal ── */}
     {modal==="resetPw"&&<Modal title={`🔑 Reset Password — ${form.name}`} onClose={()=>setModal(null)}>
       <div style={{background:C.surface,borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.muted,lineHeight:1.6}}>
@@ -8843,8 +9247,9 @@ export default function App(){
   useTheme();
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
+  const activeBranchId=useBranch();
   const [users,setUsers]=useStore("rcm_users",D_USERS);
-  const [data,setData]=useStore("rcm_data",D_DATA);
+  const [data,setData]=useStore(`rcm_branch_${activeBranchId}_data`,D_DATA);
   const [sess,setSess]=useState(()=>loadSession(D_USERS)); // restore session on reload
   const [tab,setTab]=useState("dashboard");
   const [sideOpen,setSideOpen]=useState(true);
@@ -8969,6 +9374,7 @@ export default function App(){
           })()}
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             <button onClick={()=>setShowQuickPOS(true)} style={{background:C.accent+"22",color:C.accent,border:`1px solid ${C.accent}44`,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700}}>⚡ POS</button>
+            <BranchSwitcher />
             <NotifBell role={sess.role}/>
           </div>
         </div>
@@ -9044,6 +9450,7 @@ export default function App(){
             <button onClick={()=>setShowQuickPOS(true)} style={{background:C.accent+"22",color:C.accent,border:`1px solid ${C.accent}44`,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
               ⚡ Quick POS <span style={{fontSize:10,color:C.muted,fontWeight:400}}>[P]</span>
             </button>
+            <BranchSwitcher />
             <NotifBell role={sess.role}/>
           </div>
           <div style={{padding:"10px 22px 22px"}}>
