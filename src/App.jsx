@@ -3947,6 +3947,7 @@ function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
   // Mobile: stacked layout with floating cart button
   // Desktop: side-by-side
   return (
+    <>
     <div style={{ position:"fixed", inset:0, zIndex:1000, background:C.bg, display:"flex", flexDirection:"column", animation:"fadeIn .18s ease" }}>
       {/* Top bar */}
       <div style={{ display:"flex", alignItems:"center", gap:10, padding: isMobile?"9px 12px":"10px 18px", background:C.surface, borderBottom:`1px solid ${C.border}`, flexShrink:0, flexWrap:"wrap" }}>
@@ -4153,6 +4154,7 @@ function POSPro({ data, setData, onClose, onSwitch, isMobile }) {
       </div>
     </div>
     {modifierTarget && <ModifierPicker menuItem={modifierTarget} onConfirm={(mods,extra)=>addItemWithModifiers(modifierTarget,mods,extra)} onClose={()=>setModifierTarget(null)} />}
+    </>
   );
 }
 
