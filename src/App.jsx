@@ -118,7 +118,9 @@ function useTheme() {
 const makeCss = (t) => `
   @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap');
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-  body{background:${t.bg};color:${t.cream};font-family:'DM Sans',sans-serif;min-height:100vh;}
+  html,body,#root{height:100%;width:100%;}
+  body{background:${t.bg};color:${t.cream};font-family:'DM Sans',sans-serif;min-height:100dvh;overflow-x:hidden;}
+  @media(max-width:639px){body{font-size:14px;}}
   .playfair{font-family:'Playfair Display',serif;}
   ::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-track{background:${t.bg};}::-webkit-scrollbar-thumb{background:${t.border};border-radius:2px;}
   input,textarea,select{background:${t.bg};border:1px solid ${t.border};color:${t.cream};font-family:'DM Sans',sans-serif;font-size:14px;border-radius:8px;padding:9px 13px;outline:none;width:100%;transition:border-color .2s;}
@@ -135,6 +137,27 @@ const makeCss = (t) => `
   th{color:${t.muted};font-weight:600;font-size:11px;letter-spacing:.5px;}
   tr:hover td{background:${t.border}18;}
 `;
+
+function useIsMobile() {
+  const [v, setV] = useState(() => window.innerWidth < 640);
+  useEffect(() => {
+    const fn = () => setV(window.innerWidth < 640);
+    window.addEventListener("resize", fn);
+    window.addEventListener("orientationchange", fn);
+    return () => { window.removeEventListener("resize", fn); window.removeEventListener("orientationchange", fn); };
+  }, []);
+  return v;
+}
+function useIsTablet() {
+  const [v, setV] = useState(() => window.innerWidth < 1024);
+  useEffect(() => {
+    const fn = () => setV(window.innerWidth < 1024);
+    window.addEventListener("resize", fn);
+    window.addEventListener("orientationchange", fn);
+    return () => { window.removeEventListener("resize", fn); window.removeEventListener("orientationchange", fn); };
+  }, []);
+  return v;
+}
 
 const mkId=()=>Math.random().toString(36).slice(2,9);
 const now=()=>new Date().toISOString();
@@ -1021,8 +1044,9 @@ function Btn({children,onClick,variant="primary",size="md",full=false,disabled=f
 function Card({children,style={},...rest}){return <div style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:12,padding:18,...style}} {...rest}>{children}</div>;}
 function Badge({label,color=C.accent}){return <span style={{background:color+"22",color,fontSize:11,fontWeight:600,padding:"2px 8px",borderRadius:20,whiteSpace:"nowrap"}}>{String(label).toUpperCase()}</span>;}
 function Modal({title,onClose,children,wide=false}){
-  return <div style={{position:"fixed",inset:0,background:"#000c",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
-    <div className="fade-in" style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:14,width:"100%",maxWidth:wide?740:500,maxHeight:"90vh",display:"flex",flexDirection:"column"}}>
+  const isMobile = useIsMobile();
+  return <div style={{position:"fixed",inset:0,background:"#000c",zIndex:1000,display:"flex",alignItems:isMobile?"flex-end":"center",justifyContent:"center",padding:isMobile?0:16}} onClick={e=>e.target===e.currentTarget&&onClose()}>
+    <div className="fade-in" style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:isMobile?"20px 20px 0 0":14,width:"100%",maxWidth:isMobile?"100%":wide?740:500,maxHeight:isMobile?"92dvh":"90vh",display:"flex",flexDirection:"column"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 18px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
         <span className="playfair" style={{fontSize:17,fontWeight:600}}>{title}</span>
         <button onClick={onClose} style={{background:"none",color:C.muted,fontSize:18,lineHeight:1}}>✕</button>
@@ -7739,7 +7763,38 @@ const ALL_TABS=[
   {id:"settings",label:"Settings",icon:"⚙️"},
 ];
 
+// ── MOBILE MORE MENU ─────────────────────────────────────────
+function MobileMoreMenu({visibleTabs, tab, setTab, onLogout, sess}){
+  useTheme();
+  const [open, setOpen] = useState(false);
+  const roleColor={admin:C.accent,manager:C.blue,waiter:C.green,kitchen:C.red};
+  return <>
+    <button onClick={()=>setOpen(s=>!s)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"8px 4px 10px",background:"transparent",color:open?C.accent:C.muted,fontSize:10,gap:3,borderTop:open?`2px solid ${C.accent}`:"2px solid transparent"}}>
+      <span style={{fontSize:18}}>•••</span>
+      <span style={{fontSize:9}}>More</span>
+    </button>
+    {open && <div style={{position:"fixed",bottom:58,left:0,right:0,background:C.surface,borderTop:`1px solid ${C.border}`,zIndex:300,padding:"8px 12px 10px",boxShadow:"0 -4px 20px #00000030"}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:10}}>
+        {visibleTabs.map(t=>{
+          const active=tab===t.id;
+          return <button key={t.id} onClick={()=>{setTab(t.id);setOpen(false);}} style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"8px 4px",borderRadius:10,background:active?C.accent+"22":"transparent",color:active?C.accent:C.muted,fontSize:10,gap:3,border:active?`1px solid ${C.accent}44`:"1px solid transparent"}}>
+            <span style={{fontSize:20}}>{t.icon}</span>
+            <span style={{fontSize:9}}>{t.label.split(" ")[0]}</span>
+          </button>;
+        })}
+      </div>
+      <div style={{borderTop:`1px solid ${C.border}`,paddingTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:12,color:C.cream,fontWeight:500}}>{sess?.name} <Badge label={sess?.role} color={roleColor[sess?.role]||C.muted}/></div>
+        <button onClick={onLogout} style={{background:C.red+"22",color:C.red,border:`1px solid ${C.red}33`,borderRadius:7,padding:"5px 12px",fontSize:12,fontWeight:600}}>Sign Out</button>
+      </div>
+    </div>}
+  </>;
+}
+
 export default function App(){
+  useTheme();
+  const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
   const [users,setUsers]=useStore("rcm_users",D_USERS);
   const [data,setData]=useStore("rcm_data",D_DATA);
   const [sess,setSess]=useState(()=>loadSession(D_USERS)); // restore session on reload
@@ -7839,37 +7894,26 @@ export default function App(){
   const roleColor={admin:C.accent,manager:C.blue,waiter:C.green,kitchen:C.red};
   const tp={data,setData,perms};
 
+  // Auto-collapse sidebar on tablet
+  useEffect(() => { if (isTablet && !isMobile) setSideOpen(false); }, [isTablet, isMobile]);
+
   return <>
     <style>{makeCss(C)}</style>
     {showQuickPOS && <QuickPOS data={data} setData={setData} onClose={() => setShowQuickPOS(false)} />}
-    <div style={{display:"flex",minHeight:"100vh"}}>
-      <div style={{width:sideOpen?216:58,background:C.surface,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",transition:"width .22s",flexShrink:0}}>
-        <div style={{padding:sideOpen?"16px 14px 12px":"16px 8px 12px",borderBottom:`1px solid ${C.border}`}}>
-          {sideOpen?<><div className="playfair" style={{fontSize:14,fontWeight:700,color:C.accent,whiteSpace:"nowrap",overflow:"hidden"}}>{data.restaurant.name}</div><div style={{color:C.muted,fontSize:10,marginTop:1}}>Restaurant CRM</div></>:<div style={{fontSize:18,textAlign:"center"}}>🍴</div>}
-        </div>
-        <nav style={{flex:1,padding:"6px 4px",overflowY:"auto"}}>
-          {visibleTabs.map(t=>{const active=tab===t.id;return <button key={t.id} onClick={()=>setTab(t.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:sideOpen?"7px 10px":"7px 0",justifyContent:sideOpen?"flex-start":"center",borderRadius:7,marginBottom:1,background:active?C.accent+"22":"transparent",color:active?C.accent:C.muted,fontWeight:active?600:400,fontSize:12,transition:"all .12s",border:active?`1px solid ${C.accent}33`:"1px solid transparent"}}>
-            <span style={{fontSize:14}}>{t.icon}</span>
-            {sideOpen&&<span style={{whiteSpace:"nowrap",overflow:"hidden"}}>{t.label}</span>}
-          </button>;})}
-        </nav>
-        <div style={{borderTop:`1px solid ${C.border}`,padding:sideOpen?"9px 10px":"9px 4px"}}>
-          {sideOpen&&<div style={{marginBottom:7}}><div style={{fontSize:12,fontWeight:600}}>{sess.name}</div><div style={{marginTop:2}}><Badge label={sess.role} color={roleColor[sess.role]||C.muted} /></div></div>}
-          <div style={{display:"flex",gap:4}}>
-            <Btn size="sm" variant="ghost" full={sideOpen} onClick={doLogout}>{sideOpen?"Sign Out":"↩"}</Btn>
-            <button onClick={()=>setSideOpen(s=>!s)} style={{background:C.border,color:C.muted,borderRadius:6,padding:"4px 8px",fontSize:10,flexShrink:0}}>{sideOpen?"◀":"▶"}</button>
+
+    {isMobile ? (
+      /* ── MOBILE LAYOUT ── */
+      <div style={{display:"flex",flexDirection:"column",height:"100dvh",background:C.bg,overflow:"hidden"}}>
+        {/* Mobile top bar */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:C.surface,borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+          <div className="playfair" style={{fontSize:15,fontWeight:700,color:C.accent}}>{data.restaurant.name}</div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <button onClick={()=>setShowQuickPOS(true)} style={{background:C.accent+"22",color:C.accent,border:`1px solid ${C.accent}44`,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700}}>⚡ POS</button>
+            <NotifBell role={sess.role}/>
           </div>
         </div>
-      </div>
-      <div style={{flex:1,overflowY:"auto",maxHeight:"100vh"}}>
-        {/* Top bar with notification bell */}
-        <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",padding:"10px 22px 0",gap:8}}>
-          <button onClick={()=>setShowQuickPOS(true)} style={{background:C.accent+"22",color:C.accent,border:`1px solid ${C.accent}44`,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
-            ⚡ Quick POS <span style={{fontSize:10,color:C.muted,fontWeight:400}}>[P]</span>
-          </button>
-          <NotifBell role={sess.role}/>
-        </div>
-        <div style={{padding:"10px 22px 22px"}}>
+        {/* Mobile main content */}
+        <div style={{flex:1,overflowY:"auto",padding:"10px 12px 80px",willChange:"scroll-position"}}>
           <LowStockBanner data={data} />
           {tab==="dashboard"&&<Dashboard {...tp}/>}
           {tab==="tables"&&<Tables {...tp}/>}
@@ -7886,7 +7930,69 @@ export default function App(){
           {tab==="analytics"&&<Analytics {...tp}/>}
           {tab==="settings"&&<Settings {...tp} users={users} setUsers={setUsers} activeThemeId={activeThemeId} onThemeChange={handleThemeChange} sess={sess} roleTabOverrides={roleTabOverrides} setRoleTabOverrides={setRoleTabOverrides}/>}
         </div>
+        {/* Mobile bottom tab bar */}
+        <div style={{position:"fixed",bottom:0,left:0,right:0,background:C.surface,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:200,boxShadow:"0 -2px 12px #00000020"}}>
+          {visibleTabs.slice(0,5).map(t=>{
+            const active=tab===t.id;
+            return <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",padding:"8px 4px 10px",background:"transparent",color:active?C.accent:C.muted,fontSize:10,fontWeight:active?700:400,gap:3,borderTop:active?`2px solid ${C.accent}`:"2px solid transparent",transition:"all .12s"}}>
+              <span style={{fontSize:18}}>{t.icon}</span>
+              <span style={{fontSize:9,letterSpacing:.2}}>{t.label.split(" ")[0]}</span>
+            </button>;
+          })}
+          {visibleTabs.length > 5 && (
+            <MobileMoreMenu visibleTabs={visibleTabs.slice(5)} tab={tab} setTab={setTab} onLogout={doLogout} sess={sess} />
+          )}
+        </div>
       </div>
-    </div>
+    ) : (
+      /* ── DESKTOP / TABLET LAYOUT ── */
+      <div style={{display:"flex",height:"100dvh",background:C.bg,overflow:"hidden"}}>
+        {/* Sidebar */}
+        <div style={{width:sideOpen?216:58,background:C.surface,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",transition:"width .22s",flexShrink:0,overflow:"hidden"}}>
+          <div style={{padding:sideOpen?"16px 14px 12px":"16px 8px 12px",borderBottom:`1px solid ${C.border}`}}>
+            {sideOpen?<><div className="playfair" style={{fontSize:14,fontWeight:700,color:C.accent,whiteSpace:"nowrap",overflow:"hidden"}}>{data.restaurant.name}</div><div style={{color:C.muted,fontSize:10,marginTop:1}}>Restaurant CRM</div></>:<div style={{fontSize:18,textAlign:"center"}}>🍴</div>}
+          </div>
+          <nav style={{flex:1,padding:"6px 4px",overflowY:"auto"}}>
+            {visibleTabs.map(t=>{const active=tab===t.id;return <button key={t.id} onClick={()=>setTab(t.id)} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:sideOpen?"7px 10px":"7px 0",justifyContent:sideOpen?"flex-start":"center",borderRadius:7,marginBottom:1,background:active?C.accent+"22":"transparent",color:active?C.accent:C.muted,fontWeight:active?600:400,fontSize:12,transition:"all .12s",border:active?`1px solid ${C.accent}33`:"1px solid transparent"}}>
+              <span style={{fontSize:14}}>{t.icon}</span>
+              {sideOpen&&<span style={{whiteSpace:"nowrap",overflow:"hidden"}}>{t.label}</span>}
+            </button>;})}
+          </nav>
+          <div style={{borderTop:`1px solid ${C.border}`,padding:sideOpen?"9px 10px":"9px 4px"}}>
+            {sideOpen&&<div style={{marginBottom:7}}><div style={{fontSize:12,fontWeight:600}}>{sess.name}</div><div style={{marginTop:2}}><Badge label={sess.role} color={roleColor[sess.role]||C.muted} /></div></div>}
+            <div style={{display:"flex",gap:4}}>
+              <Btn size="sm" variant="ghost" full={sideOpen} onClick={doLogout}>{sideOpen?"Sign Out":"↩"}</Btn>
+              <button onClick={()=>setSideOpen(s=>!s)} style={{background:C.border,color:C.muted,borderRadius:6,padding:"4px 8px",fontSize:10,flexShrink:0}}>{sideOpen?"◀":"▶"}</button>
+            </div>
+          </div>
+        </div>
+        {/* Main content */}
+        <div style={{flex:1,overflowY:"auto",maxHeight:"100dvh",minWidth:0}}>
+          <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",padding:"10px 22px 0",gap:8,flexWrap:"wrap"}}>
+            <button onClick={()=>setShowQuickPOS(true)} style={{background:C.accent+"22",color:C.accent,border:`1px solid ${C.accent}44`,borderRadius:8,padding:"6px 14px",fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+              ⚡ Quick POS <span style={{fontSize:10,color:C.muted,fontWeight:400}}>[P]</span>
+            </button>
+            <NotifBell role={sess.role}/>
+          </div>
+          <div style={{padding:"10px 22px 22px"}}>
+            <LowStockBanner data={data} />
+            {tab==="dashboard"&&<Dashboard {...tp}/>}
+            {tab==="tables"&&<Tables {...tp}/>}
+            {tab==="orders"&&<Orders {...tp}/>}
+            {tab==="orderboard"&&<LiveOrderBoard {...tp}/>}
+            {tab==="menu"&&<Menu {...tp}/>}
+            {tab==="reservations"&&<Reservations {...tp} perms={perms}/>}
+            {tab==="staff"&&<Staff {...tp}/>}
+            {tab==="customers"&&<Customers {...tp}/>}
+            {tab==="expenses"&&<Expenses {...tp}/>}
+            {tab==="deliveries"&&<Deliveries {...tp}/>}
+            {tab==="inventory"&&<Inventory {...tp}/>}
+            {tab==="wastage"&&<Wastage {...tp}/>}
+            {tab==="analytics"&&<Analytics {...tp}/>}
+            {tab==="settings"&&<Settings {...tp} users={users} setUsers={setUsers} activeThemeId={activeThemeId} onThemeChange={handleThemeChange} sess={sess} roleTabOverrides={roleTabOverrides} setRoleTabOverrides={setRoleTabOverrides}/>}
+          </div>
+        </div>
+      </div>
+    )}
   </>;
 }
